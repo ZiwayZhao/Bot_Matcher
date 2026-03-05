@@ -5,7 +5,7 @@ Usage:
   python3 check_inbox.py <data_dir>
 
 Example:
-  python3 check_inbox.py context-match
+  python3 check_inbox.py ~/.bot-matcher
 
 Output (stdout): JSON summary of:
   - new_cards: peers who sent Profile A but haven't been evaluated yet

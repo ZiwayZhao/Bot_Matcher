@@ -5,7 +5,7 @@ Usage:
   python3 send_card.py <profile_public.md> <peer_address> <own_peer_id> [own_address]
 
 Example:
-  python3 send_card.py context-match/profile_public.md localhost:18800 agent_alice localhost:18801
+  python3 send_card.py ~/.bot-matcher/profile_public.md localhost:18800 agent_alice localhost:18801
 
 The optional own_address lets the peer auto-discover you for gossip.
 

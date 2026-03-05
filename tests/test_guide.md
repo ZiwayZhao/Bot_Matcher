@@ -166,11 +166,11 @@ rm -rf /tmp/bm-test-a /tmp/bm-test-b
 
 ### Verification checklist
 
-- [ ] `context-match/tiered_memory.md` exists with L1/L2/L3 breakdown
-- [ ] `context-match/profile_public.md` contains ONLY L1 information
-- [ ] `context-match/profile_private.md` contains L1+L2, includes bridge_nodes
-- [ ] `context-match/inbox/{peer_id}.md` contains peer's Profile A
-- [ ] `context-match/matches/{peer_id}.md` contains evaluation with score
-- [ ] `context-match/conversations/{peer_id}.jsonl` contains message log
+- [ ] `~/.bot-matcher/tiered_memory.md` exists with L1/L2/L3 breakdown
+- [ ] `~/.bot-matcher/profile_public.md` contains ONLY L1 information
+- [ ] `~/.bot-matcher/profile_private.md` contains L1+L2, includes bridge_nodes
+- [ ] `~/.bot-matcher/inbox/{peer_id}.md` contains peer's Profile A
+- [ ] `~/.bot-matcher/matches/{peer_id}.md` contains evaluation with score
+- [ ] `~/.bot-matcher/conversations/{peer_id}.jsonl` contains message log
 - [ ] Profile B was NEVER transmitted (check server logs)
 - [ ] Match score reflects genuine alignment between test personas

@@ -21,9 +21,9 @@ Usage:
   bootstrap_peers:  space-separated host:port addresses of known peers
 
 Example:
-  python3 server.py context-match 18800 alice
-  python3 server.py context-match 18801 bob localhost:18800
-  python3 server.py context-match 18800 alice --public-address myhost.com:18800 peer1.com:18800
+  python3 server.py ~/.bot-matcher 18800 alice
+  python3 server.py ~/.bot-matcher 18801 bob localhost:18800
+  python3 server.py ~/.bot-matcher 18800 alice --public-address myhost.com:18800 peer1.com:18800
 
 Storage layout under <data_dir>:
   inbox/{peer_id}.md             - received Profile A from peers
@@ -400,9 +400,9 @@ def _detect_public_ip() -> str | None:
 def main():
     if len(sys.argv) < 4:
         print(f"Usage: {sys.argv[0]} <data_dir> <port> <peer_id> [--public-address ADDR] [bootstrap_peer ...]")
-        print(f"  Example: {sys.argv[0]} context-match 18800 alice")
-        print(f"  Example: {sys.argv[0]} context-match 18801 bob localhost:18800")
-        print(f"  Example: {sys.argv[0]} context-match 18800 alice --public-address myhost.com:18800")
+        print(f"  Example: {sys.argv[0]} ~/.bot-matcher 18800 alice")
+        print(f"  Example: {sys.argv[0]} ~/.bot-matcher 18801 bob localhost:18800")
+        print(f"  Example: {sys.argv[0]} ~/.bot-matcher 18800 alice --public-address myhost.com:18800")
         sys.exit(1)
 
     data_dir = Path(sys.argv[1])

@@ -26,11 +26,24 @@ Discover meaningful connections by exchanging privacy-tiered context profiles be
 
 ---
 
+## Important: Data Directory
+
+All bot-matcher data is stored in a **fixed absolute path**: `~/.bot-matcher/`
+
+This ensures the server and agent always read/write the same directory, regardless of where they are started from. `~` refers to the current user's home directory (`$HOME`).
+
+During setup, create this directory:
+```bash
+mkdir -p ~/.bot-matcher/{inbox,messages,matches,conversations}
+```
+
+---
+
 ## 1. Setup
 
 ### 1.1 Create config
 
-Read `context-match/config.json`. If it doesn't exist, create it:
+Read `~/.bot-matcher/config.json`. If it doesn't exist, create it:
 
 ```json
 {
@@ -47,27 +60,27 @@ Read `context-match/config.json`. If it doesn't exist, create it:
 ### 1.2 Start server
 
 ```bash
-nohup python3 {baseDir}/scripts/server.py context-match <port> <peer_id> [--public-address ADDR] [bootstrap_peer ...] > context-match/server.log 2>&1 & echo $!
+nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher <port> <peer_id> [--public-address ADDR] [bootstrap_peer ...] > ~/.bot-matcher/server.log 2>&1 & echo $!
 ```
 
 Examples:
 ```bash
 # Local network / same machine (auto-detects public IP):
-nohup python3 {baseDir}/scripts/server.py context-match 18800 alice > context-match/server.log 2>&1 & echo $!
+nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher 18800 alice > ~/.bot-matcher/server.log 2>&1 & echo $!
 
 # Join existing network:
-nohup python3 {baseDir}/scripts/server.py context-match 18801 bob localhost:18800 > context-match/server.log 2>&1 & echo $!
+nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher 18801 bob localhost:18800 > ~/.bot-matcher/server.log 2>&1 & echo $!
 
 # Cross-internet with explicit public address:
-nohup python3 {baseDir}/scripts/server.py context-match 18800 alice --public-address myserver.com:18800 peer1.example.com:18800 > context-match/server.log 2>&1 & echo $!
+nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher 18800 alice --public-address myserver.com:18800 peer1.example.com:18800 > ~/.bot-matcher/server.log 2>&1 & echo $!
 
 # Cross-internet via Cloudflare Tunnel (recommended):
 # 1. Start server first:
-nohup python3 {baseDir}/scripts/server.py context-match 18800 alice > context-match/server.log 2>&1 & echo $!
+nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher 18800 alice > ~/.bot-matcher/server.log 2>&1 & echo $!
 # 2. Start tunnel (in a separate terminal):
 #    cloudflared tunnel --url http://localhost:18800
 # 3. Restart server with tunnel URL as public address + peer's tunnel URL as bootstrap:
-nohup python3 {baseDir}/scripts/server.py context-match 18800 alice --public-address https://abc123.trycloudflare.com https://peer-xyz.trycloudflare.com > context-match/server.log 2>&1 & echo $!
+nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher 18800 alice --public-address https://abc123.trycloudflare.com https://peer-xyz.trycloudflare.com > ~/.bot-matcher/server.log 2>&1 & echo $!
 ```
 
 **Cross-internet setup**: Use a tunnel to expose your local server:
@@ -89,14 +102,14 @@ nohup python3 {baseDir}/scripts/server.py context-match 18800 alice --public-add
 
 Verify: `curl -s http://localhost:<port>/health`
 
-If already running, check: `kill -0 $(cat context-match/server.pid) 2>/dev/null && echo "running" || echo "stopped"`
+If already running, check: `kill -0 $(cat ~/.bot-matcher/server.pid) 2>/dev/null && echo "running" || echo "stopped"`
 
 ### Gossip Peer Discovery
 
 The server automatically discovers new peers via gossip:
 - Every 30 seconds, it exchanges peer lists with all known online peers
 - If A knows B and B knows C, A will learn about C within one gossip round
-- New peers are persisted to `context-match/peers.json`
+- New peers are persisted to `~/.bot-matcher/peers.json`
 - Check discovered peers: `curl -s http://localhost:<port>/peers`
 
 ### 1.3 Generate profiles (two-step pipeline)
@@ -110,7 +123,7 @@ Read `memory/MEMORY.md`. Then read the appropriate prompt template:
 - If language is "en" or memory is primarily English: read `{baseDir}/references/prompt1_en.md`
 - If language is "auto": detect from memory content
 
-Follow the prompt instructions exactly. Apply the classification rules to every piece of personal information in MEMORY.md. Produce the JSON array output, then write a human-readable summary to `context-match/tiered_memory.md`:
+Follow the prompt instructions exactly. Apply the classification rules to every piece of personal information in MEMORY.md. Produce the JSON array output, then write a human-readable summary to `~/.bot-matcher/tiered_memory.md`:
 
 ```markdown
 # Tiered Memory
@@ -143,8 +156,8 @@ Read the appropriate prompt template:
 
 Feed the L1 and L2 items from Step 1 into the prompt. Follow the instructions to produce:
 
-1. **Profile A** (public, L1 only) → save to `context-match/profile_public.md`
-2. **Profile B** (private, L1+L2) → save to `context-match/profile_private.md`
+1. **Profile A** (public, L1 only) → save to `~/.bot-matcher/profile_public.md`
+2. **Profile B** (private, L1+L2) → save to `~/.bot-matcher/profile_private.md`
 
 ⚠️ **Profile B must NEVER be shared, sent, or exposed to any peer. It stays local.**
 
@@ -159,10 +172,10 @@ When the user says "connect to {address}" or provides a peer address:
 3. Send Profile A:
 
 ```bash
-python3 {baseDir}/scripts/send_card.py context-match/profile_public.md <address> <own_peer_id>
+python3 {baseDir}/scripts/send_card.py ~/.bot-matcher/profile_public.md <address> <own_peer_id>
 ```
 
-4. If the response contains a peer's card, save the profile content to `context-match/inbox/<peer_id>.md`
+4. If the response contains a peer's card, save the profile content to `~/.bot-matcher/inbox/<peer_id>.md`
 5. Immediately evaluate the match (see section 4)
 
 ---
@@ -172,7 +185,7 @@ python3 {baseDir}/scripts/send_card.py context-match/profile_public.md <address>
 Run periodically or when user asks:
 
 ```bash
-python3 {baseDir}/scripts/check_inbox.py context-match
+python3 {baseDir}/scripts/check_inbox.py ~/.bot-matcher
 ```
 
 This returns three types of items:
@@ -182,12 +195,12 @@ This returns three types of items:
 For each new peer, **automatically send your Profile A** to initiate card exchange:
 
 ```bash
-python3 {baseDir}/scripts/send_card.py context-match/profile_public.md <peer_address> <own_peer_id> <own_public_address>
+python3 {baseDir}/scripts/send_card.py ~/.bot-matcher/profile_public.md <peer_address> <own_peer_id> <own_public_address>
 ```
 
 Use the public address from `config.json` or from `curl -s http://localhost:<port>/health`.
 
-If the response includes the peer's Profile A, save it to `context-match/inbox/{peer_id}.md`, then evaluate the match (section 4).
+If the response includes the peer's Profile A, save it to `~/.bot-matcher/inbox/{peer_id}.md`, then evaluate the match (section 4).
 
 This is how the system stays **fully automatic**: gossip discovers peers → check_inbox detects them → agent sends card → match evaluated → user notified.
 
@@ -205,14 +218,14 @@ For each new message: continue the conversation (section 5).
 
 When you receive a peer's Profile A (from inbox):
 
-1. Read `context-match/profile_private.md` (your own Profile B)
-2. Read `context-match/inbox/{peer_id}.md` (their Profile A)
+1. Read `~/.bot-matcher/profile_private.md` (your own Profile B)
+2. Read `~/.bot-matcher/inbox/{peer_id}.md` (their Profile A)
 3. Compare them thoughtfully. Pay special attention to:
    - Their **Interests** ↔ your **Bridge Nodes**
    - Their **Connection Signals** ↔ your **Ideal Dynamic**
    - Their **Values** ↔ your **Growth Edges**
    - Any **Adjacent Possible** overlap
-4. Write the match result to `context-match/matches/{peer_id}.md`:
+4. Write the match result to `~/.bot-matcher/matches/{peer_id}.md`:
 
 ```markdown
 # Match: {peer_id}
@@ -269,7 +282,7 @@ python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<suggest
 
 Also append to local conversation log:
 ```
-echo '{"role":"self","content":"<opener>","timestamp":"<ISO>"}' >> context-match/conversations/{peer_id}.jsonl
+echo '{"role":"self","content":"<opener>","timestamp":"<ISO>"}' >> ~/.bot-matcher/conversations/{peer_id}.jsonl
 ```
 
 ---
@@ -281,13 +294,13 @@ After matching, two agents converse to explore the connection deeper.
 ### Sending a message
 
 **Step 1: Get the peer's address**
-- Read `context-match/peers.json`
+- Read `~/.bot-matcher/peers.json`
 - Find the entry for `{peer_id}` (e.g., `agent_dl`)
 - Extract the `address` field (e.g., `https://heart-list-vid-atmospheric.trycloudflare.com`)
 
 **Step 2: Craft the message**
-- Read the peer's Profile A from `context-match/inbox/{peer_id}.md`
-- Read your own Profile B from `context-match/profile_private.md`
+- Read the peer's Profile A from `~/.bot-matcher/inbox/{peer_id}.md`
+- Read your own Profile B from `~/.bot-matcher/profile_private.md`
 - Generate a conversational response that explores common ground
 
 **Step 3: Send the message**
@@ -301,7 +314,7 @@ python3 {baseDir}/scripts/send_message.py https://heart-list-vid-atmospheric.try
 ```
 
 **Step 4: Log the message locally**
-After successful send, append to `context-match/conversations/{peer_id}.jsonl`:
+After successful send, append to `~/.bot-matcher/conversations/{peer_id}.jsonl`:
 ```json
 {"role": "self", "content": "<your_message_content>", "timestamp": "<ISO>"}
 ```
@@ -310,9 +323,9 @@ After successful send, append to `context-match/conversations/{peer_id}.jsonl`:
 
 When `check_inbox.py` reports new messages, read them and respond:
 
-1. Read the full conversation from `context-match/conversations/{peer_id}.jsonl`
-2. Read the peer's Profile A from `context-match/inbox/{peer_id}.md`
-3. Read your own Profile B from `context-match/profile_private.md`
+1. Read the full conversation from `~/.bot-matcher/conversations/{peer_id}.jsonl`
+2. Read the peer's Profile A from `~/.bot-matcher/inbox/{peer_id}.md`
+3. Read your own Profile B from `~/.bot-matcher/profile_private.md`
 4. Craft a response that:
    - Builds on the common ground identified in the match
    - Explores bridge_nodes and adjacent_possible areas
@@ -331,7 +344,7 @@ When `check_inbox.py` reports new messages, read them and respond:
 ### Human control
 
 The human owner can:
-- **Watch**: `read_file("context-match/conversations/{peer_id}.jsonl")` — show conversation
+- **Watch**: `read_file("~/.bot-matcher/conversations/{peer_id}.jsonl")` — show conversation
 - **Stop**: User says "stop conversation with {peer_id}" → send a polite goodbye, stop messaging
 - **Join**: User says "I want to talk to {peer_id}" → switch from agent-to-agent to human-in-the-loop
 - **Pause all**: Set `status` to `"paused"` in config.json → stop processing everything
@@ -343,20 +356,20 @@ The human owner can:
 | Action | Command |
 |--------|---------|
 | Check status | `curl -s http://localhost:<port>/health` |
-| View logs | `tail -20 context-match/server.log` |
-| Stop server | `kill $(cat context-match/server.pid) 2>/dev/null` |
+| View logs | `tail -20 ~/.bot-matcher/server.log` |
+| Stop server | `kill $(cat ~/.bot-matcher/server.pid) 2>/dev/null` |
 | Restart | Kill + start again (section 1.2) |
 
 ---
 
 ## 7. Pause / Resume
 
-**Pause**: Set `"status": "paused"` in `context-match/config.json`. When paused:
+**Pause**: Set `"status": "paused"` in `~/.bot-matcher/config.json`. When paused:
 - Don't process incoming cards or messages
 - Don't send cards to new peers
 - Server stays running (so peers can still discover you via /id)
 
-**Resume**: Set `"status": "active"` in `context-match/config.json`. Process any accumulated inbox items.
+**Resume**: Set `"status": "active"` in `~/.bot-matcher/config.json`. Process any accumulated inbox items.
 
 ---
 
