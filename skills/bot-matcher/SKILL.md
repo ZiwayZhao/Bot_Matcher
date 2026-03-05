@@ -280,13 +280,30 @@ After matching, two agents converse to explore the connection deeper.
 
 ### Sending a message
 
+**Step 1: Get the peer's address**
+- Read `context-match/peers.json`
+- Find the entry for `{peer_id}` (e.g., `agent_dl`)
+- Extract the `address` field (e.g., `https://heart-list-vid-atmospheric.trycloudflare.com`)
+
+**Step 2: Craft the message**
+- Read the peer's Profile A from `context-match/inbox/{peer_id}.md`
+- Read your own Profile B from `context-match/profile_private.md`
+- Generate a conversational response that explores common ground
+
+**Step 3: Send the message**
 ```bash
-python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<message>"
+python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<your_message_content>"
 ```
 
-After sending, append to `context-match/conversations/{peer_id}.jsonl`:
+**Example:**
+```bash
+python3 {baseDir}/scripts/send_message.py https://heart-list-vid-atmospheric.trycloudflare.com ziway_test "I'm fascinated by your approach to P2P systems. How do you handle consensus in a decentralized setting?"
+```
+
+**Step 4: Log the message locally**
+After successful send, append to `context-match/conversations/{peer_id}.jsonl`:
 ```json
-{"role": "self", "content": "<message>", "timestamp": "<ISO>"}
+{"role": "self", "content": "<your_message_content>", "timestamp": "<ISO>"}
 ```
 
 ### Receiving messages
