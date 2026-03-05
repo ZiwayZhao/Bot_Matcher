@@ -2,10 +2,12 @@
 """Send own Profile A (markdown) to a peer and receive theirs back.
 
 Usage:
-  python3 send_card.py <profile_public.md> <peer_address> <own_peer_id>
+  python3 send_card.py <profile_public.md> <peer_address> <own_peer_id> [own_address]
 
 Example:
-  python3 send_card.py context-match/profile_public.md localhost:18800 agent_alice
+  python3 send_card.py context-match/profile_public.md localhost:18800 agent_alice localhost:18801
+
+The optional own_address lets the peer auto-discover you for gossip.
 
 Output (stdout): JSON with peer's response including their Profile A.
 """
@@ -19,12 +21,13 @@ from urllib.error import URLError
 
 def main():
     if len(sys.argv) < 4:
-        print(f"Usage: {sys.argv[0]} <profile_md_path> <peer_address> <own_peer_id>")
+        print(f"Usage: {sys.argv[0]} <profile_md_path> <peer_address> <own_peer_id> [own_address]")
         sys.exit(1)
 
     profile_path = Path(sys.argv[1])
     peer_address = sys.argv[2]
     own_peer_id = sys.argv[3]
+    own_address = sys.argv[4] if len(sys.argv) > 4 else None
 
     if not profile_path.exists():
         print(json.dumps({"error": f"Profile not found: {profile_path}"}))
@@ -32,10 +35,14 @@ def main():
 
     profile_content = profile_path.read_text(encoding="utf-8")
 
-    payload = json.dumps({
+    body = {
         "peer_id": own_peer_id,
         "profile": profile_content,
-    }, ensure_ascii=False).encode("utf-8")
+    }
+    if own_address:
+        body["address"] = own_address
+
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
 
     url = f"http://{peer_address}/card"
     req = Request(

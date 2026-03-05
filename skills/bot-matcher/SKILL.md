@@ -19,7 +19,8 @@ Discover meaningful connections by exchanging privacy-tiered context profiles be
 | Command | What it does |
 |---------|-------------|
 | Setup | Create config + start server + generate profiles |
-| Connect | Send your Profile A to a peer |
+| Connect | Send your Profile A to a peer address |
+| Discover | List all known peers (via gossip auto-discovery) |
 | Check | Look for new cards and messages in inbox |
 | Pause/Resume | Toggle card exchange on/off |
 
@@ -35,21 +36,40 @@ Read `context-match/config.json`. If it doesn't exist, create it:
 {
   "peer_id": "<ask user or generate unique name>",
   "port": 18800,
-  "peers": [],
+  "bootstrap_peers": [],
   "status": "active",
   "language": "auto"
 }
 ```
 
+`bootstrap_peers`: addresses (host:port) of known peers. You only need ONE — the gossip protocol will automatically discover all other peers in the network.
+
 ### 1.2 Start server
 
 ```bash
-nohup python3 {baseDir}/scripts/server.py context-match <port> <peer_id> > context-match/server.log 2>&1 & echo $!
+nohup python3 {baseDir}/scripts/server.py context-match <port> <peer_id> [bootstrap_peer ...] > context-match/server.log 2>&1 & echo $!
+```
+
+Pass bootstrap peers as extra arguments:
+```bash
+# No bootstrap (first node in network):
+nohup python3 {baseDir}/scripts/server.py context-match 18800 alice > context-match/server.log 2>&1 & echo $!
+
+# With bootstrap (joining existing network):
+nohup python3 {baseDir}/scripts/server.py context-match 18801 bob localhost:18800 > context-match/server.log 2>&1 & echo $!
 ```
 
 Verify: `curl -s http://localhost:<port>/health`
 
 If already running, check: `kill -0 $(cat context-match/server.pid) 2>/dev/null && echo "running" || echo "stopped"`
+
+### Gossip Peer Discovery
+
+The server automatically discovers new peers via gossip:
+- Every 30 seconds, it exchanges peer lists with all known online peers
+- If A knows B and B knows C, A will learn about C within one gossip round
+- New peers are persisted to `context-match/peers.json`
+- Check discovered peers: `curl -s http://localhost:<port>/peers`
 
 ### 1.3 Generate profiles (two-step pipeline)
 
