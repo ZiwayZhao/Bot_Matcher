@@ -16,6 +16,13 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 
+def make_url(address: str, path: str) -> str:
+    """Build a full URL from an address and path, supporting http/https prefixes."""
+    if address.startswith("http://") or address.startswith("https://"):
+        return f"{address.rstrip('/')}{path}"
+    return f"http://{address}{path}"
+
+
 def main():
     if len(sys.argv) < 4:
         print(f"Usage: {sys.argv[0]} <peer_address> <sender_id> <message>")
@@ -30,7 +37,7 @@ def main():
         "content": message,
     }, ensure_ascii=False).encode("utf-8")
 
-    url = f"http://{peer_address}/message"
+    url = make_url(peer_address, "/message")
     req = Request(
         url,
         data=payload,

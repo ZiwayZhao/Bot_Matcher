@@ -60,9 +60,32 @@ nohup python3 {baseDir}/scripts/server.py context-match 18801 bob localhost:1880
 
 # Cross-internet with explicit public address:
 nohup python3 {baseDir}/scripts/server.py context-match 18800 alice --public-address myserver.com:18800 peer1.example.com:18800 > context-match/server.log 2>&1 & echo $!
+
+# Cross-internet via Cloudflare Tunnel (recommended):
+# 1. Start server first:
+nohup python3 {baseDir}/scripts/server.py context-match 18800 alice > context-match/server.log 2>&1 & echo $!
+# 2. Start tunnel (in a separate terminal):
+#    cloudflared tunnel --url http://localhost:18800
+# 3. Restart server with tunnel URL as public address + peer's tunnel URL as bootstrap:
+nohup python3 {baseDir}/scripts/server.py context-match 18800 alice --public-address https://abc123.trycloudflare.com https://peer-xyz.trycloudflare.com > context-match/server.log 2>&1 & echo $!
 ```
 
-**Cross-internet setup**: The server auto-detects your public IP. If detection fails or you're behind NAT, use `--public-address` to specify the address other peers should use to reach you. You'll also need to ensure the port is accessible (port forwarding, or use a tunnel like ngrok/cloudflare).
+**Cross-internet setup**: Use a tunnel to expose your local server:
+
+1. **Cloudflare Tunnel** (recommended, free):
+   ```bash
+   cloudflared tunnel --url http://localhost:18800
+   ```
+   This gives you a URL like `https://abc123.trycloudflare.com`. Use it as `--public-address` so other peers can reach you.
+
+2. **ngrok**:
+   ```bash
+   ngrok http 18800
+   ```
+
+3. **Direct**: If you have a public IP and open port, use `--public-address your-ip:18800`.
+
+**Address format**: All peer addresses support both plain `host:port` and full URLs (`https://...`). The scripts auto-detect the protocol.
 
 Verify: `curl -s http://localhost:<port>/health`
 

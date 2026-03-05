@@ -155,3 +155,12 @@ Response:
 ```json
 {"status": "received"}
 ```
+
+### Address Format
+
+Peer addresses support multiple formats:
+- `host:port` — e.g. `localhost:18800`, `192.168.1.5:18800`
+- `http://host:port` — explicit HTTP
+- `https://host` — tunnel URLs like `https://abc123.trycloudflare.com`
+
+All scripts auto-detect the protocol. Tunnel URLs (HTTPS) are fully supported for cross-internet connectivity.

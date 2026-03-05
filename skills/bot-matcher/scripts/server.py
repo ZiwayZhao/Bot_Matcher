@@ -47,6 +47,24 @@ from urllib.error import URLError
 
 
 # ---------------------------------------------------------------------------
+# URL Helper
+# ---------------------------------------------------------------------------
+
+def make_url(address: str, path: str) -> str:
+    """Build a full URL from an address and path.
+
+    Supports:
+      - "localhost:18800"                → "http://localhost:18800/path"
+      - "1.2.3.4:18800"                 → "http://1.2.3.4:18800/path"
+      - "http://host:port"              → "http://host:port/path"
+      - "https://abc.trycloudflare.com" → "https://abc.trycloudflare.com/path"
+    """
+    if address.startswith("http://") or address.startswith("https://"):
+        return f"{address.rstrip('/')}{path}"
+    return f"http://{address}{path}"
+
+
+# ---------------------------------------------------------------------------
 # Peer Manager
 # ---------------------------------------------------------------------------
 
@@ -165,7 +183,7 @@ def gossip_loop(peer_manager: PeerManager, interval: int = 30):
                 our_peers = peer_manager.get_peers_for_exchange(exclude=peer_id)
                 payload = json.dumps({"peers": our_peers}).encode("utf-8")
                 req = Request(
-                    f"http://{address}/exchange",
+                    make_url(address, "/exchange"),
                     data=payload,
                     headers={"Content-Type": "application/json"},
                     method="POST",
@@ -183,7 +201,7 @@ def bootstrap_peers(peer_manager: PeerManager, addresses: list[str]):
     """Connect to bootstrap peers: discover their IDs, add them."""
     for addr in addresses:
         try:
-            req = Request(f"http://{addr}/id", method="GET")
+            req = Request(make_url(addr, "/id"), method="GET")
             with urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read())
                 pid = data.get("peer_id")

@@ -19,6 +19,13 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 
+def make_url(address: str, path: str) -> str:
+    """Build a full URL from an address and path, supporting http/https prefixes."""
+    if address.startswith("http://") or address.startswith("https://"):
+        return f"{address.rstrip('/')}{path}"
+    return f"http://{address}{path}"
+
+
 def main():
     if len(sys.argv) < 4:
         print(f"Usage: {sys.argv[0]} <profile_md_path> <peer_address> <own_peer_id> [own_address]")
@@ -44,7 +51,7 @@ def main():
 
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
 
-    url = f"http://{peer_address}/card"
+    url = make_url(peer_address, "/card")
     req = Request(
         url,
         data=payload,
