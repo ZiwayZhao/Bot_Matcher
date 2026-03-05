@@ -47,17 +47,22 @@ Read `context-match/config.json`. If it doesn't exist, create it:
 ### 1.2 Start server
 
 ```bash
-nohup python3 {baseDir}/scripts/server.py context-match <port> <peer_id> [bootstrap_peer ...] > context-match/server.log 2>&1 & echo $!
+nohup python3 {baseDir}/scripts/server.py context-match <port> <peer_id> [--public-address ADDR] [bootstrap_peer ...] > context-match/server.log 2>&1 & echo $!
 ```
 
-Pass bootstrap peers as extra arguments:
+Examples:
 ```bash
-# No bootstrap (first node in network):
+# Local network / same machine (auto-detects public IP):
 nohup python3 {baseDir}/scripts/server.py context-match 18800 alice > context-match/server.log 2>&1 & echo $!
 
-# With bootstrap (joining existing network):
+# Join existing network:
 nohup python3 {baseDir}/scripts/server.py context-match 18801 bob localhost:18800 > context-match/server.log 2>&1 & echo $!
+
+# Cross-internet with explicit public address:
+nohup python3 {baseDir}/scripts/server.py context-match 18800 alice --public-address myserver.com:18800 peer1.example.com:18800 > context-match/server.log 2>&1 & echo $!
 ```
+
+**Cross-internet setup**: The server auto-detects your public IP. If detection fails or you're behind NAT, use `--public-address` to specify the address other peers should use to reach you. You'll also need to ensure the port is accessible (port forwarding, or use a tunnel like ngrok/cloudflare).
 
 Verify: `curl -s http://localhost:<port>/health`
 
@@ -154,8 +159,10 @@ This returns three types of items:
 For each new peer, **automatically send your Profile A** to initiate card exchange:
 
 ```bash
-python3 {baseDir}/scripts/send_card.py context-match/profile_public.md <peer_address> <own_peer_id> localhost:<own_port>
+python3 {baseDir}/scripts/send_card.py context-match/profile_public.md <peer_address> <own_peer_id> <own_public_address>
 ```
+
+Use the public address from `config.json` or from `curl -s http://localhost:<port>/health`.
 
 If the response includes the peer's Profile A, save it to `context-match/inbox/{peer_id}.md`, then evaluate the match (section 4).
 

@@ -13,13 +13,17 @@ Endpoints:
   GET  /messages?peer=X&since=N  - Fetch messages from a peer since line N
 
 Usage:
-  python3 server.py <data_dir> <port> <peer_id> [bootstrap_peers...]
+  python3 server.py <data_dir> <port> <peer_id> [--public-address ADDR] [bootstrap_peers...]
 
-  bootstrap_peers: space-separated host:port addresses of known peers
+  --public-address: the address other peers should use to reach this server
+                    (e.g. your-domain.com:18800 or 1.2.3.4:18800)
+                    Defaults to localhost:<port> if not set.
+  bootstrap_peers:  space-separated host:port addresses of known peers
 
 Example:
-  python3 server.py context-match 18800 agent_alice
-  python3 server.py context-match 18801 agent_bob localhost:18800
+  python3 server.py context-match 18800 alice
+  python3 server.py context-match 18801 bob localhost:18800
+  python3 server.py context-match 18800 alice --public-address myhost.com:18800 peer1.com:18800
 
 Storage layout under <data_dir>:
   inbox/{peer_id}.md             - received Profile A from peers
@@ -211,6 +215,7 @@ class BotMatcherHandler(BaseHTTPRequestHandler):
             self._json_response(200, {
                 "status": "ok",
                 "peer_id": self.server.peer_id,
+                "public_address": self.server.peer_manager.own_address,
                 "uptime": int(time.time() - self.server.start_time),
                 "inbox_count": inbox_count,
                 "peers_total": len(all_peers),
@@ -360,17 +365,58 @@ class BotMatcherHandler(BaseHTTPRequestHandler):
 # Main
 # ---------------------------------------------------------------------------
 
+def _detect_public_ip() -> str | None:
+    """Try to detect public IP via free API. Returns IP string or None."""
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
+        try:
+            req = Request(url, method="GET")
+            with urlopen(req, timeout=5) as resp:
+                ip = resp.read().decode().strip()
+                if ip:
+                    return ip
+        except Exception:
+            continue
+    return None
+
+
 def main():
     if len(sys.argv) < 4:
-        print(f"Usage: {sys.argv[0]} <data_dir> <port> <peer_id> [bootstrap_peer ...]")
+        print(f"Usage: {sys.argv[0]} <data_dir> <port> <peer_id> [--public-address ADDR] [bootstrap_peer ...]")
         print(f"  Example: {sys.argv[0]} context-match 18800 alice")
         print(f"  Example: {sys.argv[0]} context-match 18801 bob localhost:18800")
+        print(f"  Example: {sys.argv[0]} context-match 18800 alice --public-address myhost.com:18800")
         sys.exit(1)
 
     data_dir = Path(sys.argv[1])
     port = int(sys.argv[2])
     peer_id = sys.argv[3]
-    bootstrap_addrs = sys.argv[4:]  # optional: host:port of known peers
+
+    # Parse remaining args: --public-address and bootstrap peers
+    public_address = None
+    bootstrap_addrs = []
+    args = sys.argv[4:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--public-address" and i + 1 < len(args):
+            public_address = args[i + 1]
+            i += 2
+        else:
+            bootstrap_addrs.append(args[i])
+            i += 1
+
+    # Determine own_address for gossip propagation
+    if public_address:
+        own_address = public_address
+        _log(f"Using provided public address: {own_address}")
+    else:
+        # Try auto-detect public IP
+        detected_ip = _detect_public_ip()
+        if detected_ip:
+            own_address = f"{detected_ip}:{port}"
+            _log(f"Auto-detected public address: {own_address}")
+        else:
+            own_address = f"localhost:{port}"
+            _log(f"Using localhost (no public address detected): {own_address}")
 
     # Ensure data directories exist
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -378,7 +424,6 @@ def main():
         (data_dir / sub).mkdir(exist_ok=True)
 
     # Initialize peer manager
-    own_address = f"localhost:{port}"
     peer_manager = PeerManager(peer_id, own_address, data_dir)
 
     # Bootstrap: connect to known peers
