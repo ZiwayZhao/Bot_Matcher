@@ -147,9 +147,26 @@ Run periodically or when user asks:
 python3 {baseDir}/scripts/check_inbox.py context-match
 ```
 
-This returns new cards (profiles without match evaluations) and new messages.
+This returns three types of items:
+
+### 3a. `new_peers` — Gossip-discovered peers with no card exchange yet
+
+For each new peer, **automatically send your Profile A** to initiate card exchange:
+
+```bash
+python3 {baseDir}/scripts/send_card.py context-match/profile_public.md <peer_address> <own_peer_id> localhost:<own_port>
+```
+
+If the response includes the peer's Profile A, save it to `context-match/inbox/{peer_id}.md`, then evaluate the match (section 4).
+
+This is how the system stays **fully automatic**: gossip discovers peers → check_inbox detects them → agent sends card → match evaluated → user notified.
+
+### 3b. `new_cards` — Received profiles without match evaluation
 
 For each new card: evaluate the match (section 4).
+
+### 3c. `new_messages` — Unread conversation messages
+
 For each new message: continue the conversation (section 5).
 
 ---
