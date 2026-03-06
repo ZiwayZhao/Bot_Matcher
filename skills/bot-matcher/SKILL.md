@@ -381,3 +381,19 @@ Regenerate profiles when:
 - Profile is older than 7 days
 
 Run the full two-step pipeline again (section 1.3). The old profiles are overwritten.
+
+## 9. Two-Tier Matching (match_tiered.py)
+
+Replaces the manual match evaluation in section 4 with an automated two-tier pipeline.
+
+### Tier 1 — Vector Screening (Profile A, public)
+Uses TF-IDF cosine similarity to rank all peers by Profile A similarity and returns a
+shortlist (TOP_K_TIER1, default 1 for testing / 20 for production). No LLM, no private
+data — fast and cheap.
+
+### Tier 2 — LLM Deep Match (Profile B, TEE)
+For each Tier-1 candidate, the peer's Profile B is fetched via a TEE channel and scored
+by the LLM against your own Profile B. Only the structured result exits the TEE boundary.
+
+### Run / Local testing / TEE integration point / Output
+... (usage instructions, fallback path, where the TEE boundary comments are)
