@@ -37,6 +37,20 @@ During setup, create this directory:
 mkdir -p ~/.bot-matcher/{inbox,messages,matches,conversations}
 ```
 
+## ⚠️ Important: Script Paths
+
+All Python scripts live in the **`scripts/`** subdirectory. Always use `{baseDir}/scripts/` as the prefix:
+
+```
+{baseDir}/scripts/server.py      ← server
+{baseDir}/scripts/send_card.py   ← send Profile A
+{baseDir}/scripts/send_message.py ← send conversation message
+{baseDir}/scripts/check_inbox.py  ← check for new cards/messages
+{baseDir}/scripts/match_tiered.py ← two-tier matching
+```
+
+**NEVER** use `{baseDir}/server.py` or `{baseDir}/send_card.py` — those paths do NOT exist.
+
 ---
 
 ## 1. Setup
@@ -59,6 +73,13 @@ Read `~/.bot-matcher/config.json`. If it doesn't exist, create it:
 
 ### 1.2 Start server
 
+**⚠️ FIRST check if the server is already running:**
+```bash
+kill -0 $(cat ~/.bot-matcher/server.pid) 2>/dev/null && echo "RUNNING" || echo "STOPPED"
+```
+If it prints "RUNNING", **skip this step entirely** — do NOT start a second server. Go straight to verifying with `curl -s http://localhost:<port>/health`.
+
+Only if "STOPPED", start the server:
 ```bash
 nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher <port> <peer_id> [--public-address ADDR] [bootstrap_peer ...] > ~/.bot-matcher/server.log 2>&1 & echo $!
 ```
