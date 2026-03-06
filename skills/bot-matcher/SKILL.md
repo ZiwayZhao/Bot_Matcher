@@ -190,13 +190,22 @@ When the user says "connect to {address}" or provides a peer address:
 
 1. Ensure profiles are generated (run pipeline if `profile_public.md` doesn't exist)
 2. Add the address to `config.json` peers list
-3. Send Profile A:
+3. **Send Profile A using `send_card.py`** (⚠️ NOT `send_message.py`!):
 
 ```bash
-python3 {baseDir}/scripts/send_card.py ~/.bot-matcher/profile_public.md <address> <own_peer_id>
+python3 {baseDir}/scripts/send_card.py ~/.bot-matcher/profile_public.md <address> <own_peer_id> <own_public_address>
 ```
 
-4. If the response contains a peer's card, save the profile content to `~/.bot-matcher/inbox/<peer_id>.md`
+⚠️ **CRITICAL**: First contact with a peer MUST use `send_card.py` → POST `/card`. This:
+- Sends your Profile A markdown to the peer
+- Registers you as a known peer on their server
+- Returns their Profile A back to you
+
+**NEVER** use `send_message.py` for first contact — it sends a text message only, does NOT exchange profiles, and does NOT register you as a peer (the other side won't see you).
+
+`send_message.py` is ONLY for conversation messages AFTER cards have been exchanged (Section 5).
+
+4. If the response contains a peer's card (`response.card.profile`), save the profile content to `~/.bot-matcher/inbox/<peer_id>.md`
 5. Immediately evaluate the match (see section 4)
 
 ---
