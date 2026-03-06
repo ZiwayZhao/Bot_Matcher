@@ -212,7 +212,15 @@ python3 {baseDir}/scripts/send_card.py ~/.bot-matcher/profile_public.md <address
 
 ## 3. Check Inbox
 
-Run periodically or when user asks:
+⚠️ **ALWAYS use the `check_inbox.py` script** to check for new items. **NEVER** manually `ls` a single directory — data is split across multiple directories:
+
+| Directory | Contains | Checked by |
+|-----------|----------|------------|
+| `~/.bot-matcher/inbox/` | Received Profile A cards (`.md`) | `check_inbox.py` → `new_cards` |
+| `~/.bot-matcher/messages/` | Conversation messages (`.jsonl`) | `check_inbox.py` → `new_messages` |
+| `~/.bot-matcher/peers.json` | Gossip-discovered peers | `check_inbox.py` → `new_peers` |
+
+Running the script checks ALL three sources at once:
 
 ```bash
 python3 {baseDir}/scripts/check_inbox.py ~/.bot-matcher
