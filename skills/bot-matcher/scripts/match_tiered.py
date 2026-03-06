@@ -19,7 +19,7 @@ Architecture:
 Usage:
   python3 match_tiered.py <data_dir> [--top-k N] [--ollama-url URL] [--model MODEL]
 
-  data_dir:      your context-match directory (contains profile_public.md,
+  data_dir:      your ~/.bot-matcher directory (contains profile_public.md,
                  profile_private.md, inbox/)
   --top-k:       Tier-1 shortlist size (default: 1 for testing, 20 for prod)
   --ollama-url:  Ollama base URL (default: http://localhost:11434)
@@ -356,7 +356,7 @@ def write_match_file(data_dir: Path, result: dict) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(description="Two-tier Bot-Matcher")
-    parser.add_argument("data_dir", help="context-match data directory")
+    parser.add_argument("data_dir", help="~/.bot-matcher data directory")
     parser.add_argument("--top-k", type=int, default=TOP_K_TIER1,
                         help=f"Tier-1 shortlist size (default: {TOP_K_TIER1})")
     parser.add_argument("--ollama-url", default=OLLAMA_DEFAULT_URL,
