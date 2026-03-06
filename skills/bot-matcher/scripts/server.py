@@ -171,13 +171,17 @@ def _log(msg: str):
 
 
 def gossip_loop(peer_manager: PeerManager, interval: int = 30):
-    """Periodically exchange peer lists with all known online peers."""
+    """Periodically exchange peer lists with all known online peers.
+
+    Every 5th cycle (~2.5 min), also probe offline peers for recovery.
+    """
+    cycle = 0
     while True:
         time.sleep(interval)
-        online = peer_manager.get_online_peers()
-        if not online:
-            continue
+        cycle += 1
 
+        # Normal gossip: exchange with online peers
+        online = peer_manager.get_online_peers()
         for peer_id, address in online.items():
             try:
                 our_peers = peer_manager.get_peers_for_exchange(exclude=peer_id)
@@ -195,6 +199,20 @@ def gossip_loop(peer_manager: PeerManager, interval: int = 30):
                             peer_manager.add_peer(rid, raddr)
             except Exception:
                 peer_manager.mark_offline(peer_id)
+
+        # Every 5th cycle: try to recover offline peers
+        if cycle % 5 == 0:
+            all_peers = peer_manager.get_all_peers()
+            for pid, info in all_peers.items():
+                if not info["online"]:
+                    try:
+                        req = Request(make_url(info["address"], "/id"), method="GET")
+                        with urlopen(req, timeout=5) as resp:
+                            if resp.status == 200:
+                                peer_manager.add_peer(pid, info["address"])
+                                _log(f"Recovered offline peer: {pid}")
+                    except Exception:
+                        pass
 
 
 def bootstrap_peers(peer_manager: PeerManager, addresses: list[str]):
@@ -346,6 +364,17 @@ class BotMatcherHandler(BaseHTTPRequestHandler):
                 self._json_response(400, {"error": "missing sender_id or content"})
                 return
 
+            # Deduplicate by message_id (prevents retries / gossip re-delivery)
+            message_id = body.get("message_id", "")
+            if message_id:
+                if message_id in self.server.seen_message_ids:
+                    self._json_response(200, {"status": "duplicate"})
+                    return
+                self.server.seen_message_ids.add(message_id)
+                if len(self.server.seen_message_ids) > self.server.max_seen_ids:
+                    seen_list = list(self.server.seen_message_ids)
+                    self.server.seen_message_ids = set(seen_list[len(seen_list) // 2:])
+
             msg_dir = self.server.data_dir / "messages"
             msg_dir.mkdir(parents=True, exist_ok=True)
             msg_file = msg_dir / f"{sender_id}.jsonl"
@@ -455,6 +484,8 @@ def main():
     server.data_dir = data_dir
     server.peer_manager = peer_manager
     server.start_time = time.time()
+    server.seen_message_ids: set[str] = set()
+    server.max_seen_ids = 1000
 
     # Write PID file
     pid_path = data_dir / "server.pid"

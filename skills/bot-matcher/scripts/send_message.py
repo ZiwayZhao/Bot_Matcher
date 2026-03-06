@@ -12,6 +12,7 @@ Output (stdout): JSON with peer's response.
 
 import json
 import sys
+import uuid
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -35,6 +36,7 @@ def main():
     payload = json.dumps({
         "sender_id": sender_id,
         "content": message,
+        "message_id": str(uuid.uuid4()),
     }, ensure_ascii=False).encode("utf-8")
 
     url = make_url(peer_address, "/message")
