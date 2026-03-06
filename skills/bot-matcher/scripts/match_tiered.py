@@ -12,22 +12,25 @@ Architecture:
   Tier 2 — LLM Deep Match (Profile B, private, runs in TEE)
     • For each Tier-1 candidate, fetches their Profile B over a simulated
       TEE channel (in production: an attested enclave endpoint).
-    • Calls Z.AI GLM models on YOUR Profile B + THEIR Profile B inside a simulated TEE,
-      returning a structured JSON compatibility report.
+    • Calls a local Ollama LLM to score compatibility using YOUR Profile B
+      and THEIR Profile B, with a structured JSON response.
     • Returns matching criteria, a score, and human-readable comments.
 
 Usage:
-  python3 match_tiered.py <data_dir> [--top-k N] [--model MODEL] [--api-key KEY]
+  python3 match_tiered.py <data_dir> [--top-k N] [--ollama-url URL] [--model MODEL]
 
   data_dir:      your ~/.bot-matcher directory (contains profile_public.md,
                  profile_private.md, inbox/)
   --top-k:       Tier-1 shortlist size (default: 1 for testing, 20 for prod)
-  --model:       Z.AI chat model (default: glm-5)
-  --api-key:     Z.AI API key (or set ZAI_API_KEY in the environment)
+  --ollama-url:  Ollama base URL (default: http://localhost:11434)
+  --model:       Ollama model to use (default: llama3.2 — any model that
+                 follows instructions and can output JSON works fine, e.g.
+                 mistral, phi3, gemma2, qwen2.5)
 
 Prerequisites:
-  1. A Z.AI API key (set ZAI_API_KEY).
-  2. Network connectivity to https://api.z.ai/.
+  1. Install Ollama: https://ollama.com
+  2. Pull a model: ollama pull llama3.2
+  3. Ollama runs automatically as a background service after install.
 
 TEE Note:
   In production, Tier-2 would run inside an attested enclave.  The peer's
@@ -39,7 +42,6 @@ TEE Note:
 import argparse
 import json
 import math
-import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -53,12 +55,8 @@ from urllib.error import URLError
 # ---------------------------------------------------------------------------
 
 TOP_K_TIER1 = 1          # Set to 20 for production
-ZAI_API_URL = "https://api.z.ai/api/paas/v4/chat/completions"
-ZAI_DEFAULT_MODEL = "glm-5"
-ZAI_SYSTEM_PROMPT = (
-    "You are a deep compatibility analyst."
-    " Always return valid JSON, with no prose or code fences."
-)
+OLLAMA_DEFAULT_URL = "http://localhost:11434"
+OLLAMA_DEFAULT_MODEL = "llama3.2"  # alternatives: mistral, phi3, gemma2, qwen2.5
 
 # ---------------------------------------------------------------------------
 # Tier 1: TF-IDF Vector Matching (Profile A only)
@@ -237,52 +235,50 @@ Score rubric: 9-10 exceptional, 7-8 strong, 5-6 moderate, 3-4 weak, 1-2 minimal.
 Be honest about tension_points — they are as important as common ground."""
 
 
-def call_zai(prompt: str, api_key: str, model: str) -> dict:
-    """Call the Z.AI chat-completions API and parse the JSON reply."""
-    payload = {
+def call_ollama(prompt: str, ollama_url: str, model: str) -> dict:
+    """
+    Call a local Ollama model via /api/generate and parse the JSON response.
+    Ollama streams by default; stream=False gives a single complete response.
+    format="json" enables Ollama's native JSON mode to keep output clean.
+    """
+    payload = json.dumps({
         "model": model,
-        "messages": [
-            {"role": "system", "content": ZAI_SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.1,
-    }
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+    }).encode("utf-8")
+
+    url = f"{ollama_url.rstrip('/')}/api/generate"
     req = Request(
-        ZAI_API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
     with urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read())
 
-    choices = data.get("choices", [])
-    if not choices:
-        raise RuntimeError("Z.AI response contained no choices")
-    text_resp = choices[0].get("message", {}).get("content", "").strip()
+    text = data.get("response", "").strip()
 
-    # Strip accidental markdown fences, then load JSON
-    text_resp = re.sub(r"^```(?:json)?\s*", "", text_resp)
-    text_resp = re.sub(r"\s*```$", "", text_resp)
-    return json.loads(text_resp)
+    # Strip accidental markdown fences (some models ignore format=json)
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text.strip())
+    return json.loads(text)
 
 
 def tier2_llm_match(
     own_profile_b: str,
     peer_id: str,
     peer_profile_b: str,
-    api_key: str,
+    ollama_url: str,
     model: str,
 ) -> dict:
     """
-    [TEE] Run LLM-based deep compatibility match via Z.AI.
+    [TEE] Run LLM-based deep compatibility match.
     Only the structured result exits the TEE boundary.
     """
     prompt = build_tier2_prompt(own_profile_b, peer_id, peer_profile_b)
-    result = call_zai(prompt, api_key, model)
+    result = call_ollama(prompt, ollama_url, model)
     result["evaluated_at"] = datetime.now(timezone.utc).isoformat()
     result["llm_model"] = model
     return result
@@ -363,21 +359,33 @@ def main():
     parser.add_argument("data_dir", help="~/.bot-matcher data directory")
     parser.add_argument("--top-k", type=int, default=TOP_K_TIER1,
                         help=f"Tier-1 shortlist size (default: {TOP_K_TIER1})")
-    parser.add_argument("--model", default=ZAI_DEFAULT_MODEL,
-                        help=f"Z.AI model name (default: {ZAI_DEFAULT_MODEL})")
-    parser.add_argument("--api-key", default=os.environ.get("ZAI_API_KEY", ""),
-                        help="Z.AI API key (or set ZAI_API_KEY)")
+    parser.add_argument("--ollama-url", default=OLLAMA_DEFAULT_URL,
+                        help=f"Ollama base URL (default: {OLLAMA_DEFAULT_URL})")
+    parser.add_argument("--model", default=OLLAMA_DEFAULT_MODEL,
+                        help=f"Ollama model name (default: {OLLAMA_DEFAULT_MODEL})")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
+    ollama_url = args.ollama_url
     model = args.model
-    api_key = args.api_key
 
-    if not api_key:
-        print("ERROR: No Z.AI API key provided. Set ZAI_API_KEY or pass --api-key.", file=sys.stderr)
+    # Verify Ollama is reachable before doing any work
+    try:
+        req = Request(f"{ollama_url.rstrip('/')}/api/tags", method="GET")
+        with urlopen(req, timeout=5) as resp:
+            tags = json.loads(resp.read())
+        available = [m["name"] for m in tags.get("models", [])]
+        if model not in available and not any(m.startswith(model) for m in available):
+            print(f"WARNING: model '{model}' not found in Ollama. Available: {available}", file=sys.stderr)
+            print(f"  Run:  ollama pull {model}", file=sys.stderr)
+        else:
+            print(f"[Ollama] Using model '{model}' at {ollama_url}")
+    except Exception as e:
+        print(f"ERROR: Cannot reach Ollama at {ollama_url} — is it running?", file=sys.stderr)
+        print(f"  Install: https://ollama.com", file=sys.stderr)
+        print(f"  Start:   ollama serve", file=sys.stderr)
+        print(f"  Pull:    ollama pull {model}", file=sys.stderr)
         sys.exit(1)
-
-    print(f"[Z.AI] Using model '{model}' via Chat Completions API")
 
     # --- Load own profiles ---
     own_profile_a_path = data_dir / "profile_public.md"
@@ -440,7 +448,7 @@ def main():
 
         print(f"  [TEE] Profile B obtained. Calling LLM for deep match...")
         try:
-            result = tier2_llm_match(own_profile_b, peer_id, peer_profile_b, api_key, model)
+            result = tier2_llm_match(own_profile_b, peer_id, peer_profile_b, ollama_url, model)
         except Exception as e:
             print(f"  [TEE] LLM call failed for {peer_id}: {e}", file=sys.stderr)
             continue
