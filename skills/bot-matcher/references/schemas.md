@@ -225,3 +225,86 @@ Generated at the end of the matchmaker conversation (turn 9-10). Summarizes find
 ## Recommendation
 {Should the humans meet? Why or why not? Be direct and useful.}
 ```
+
+---
+
+## 10. Handshake Output (`handshakes/{peer_id}.json`)
+
+Bridge between bot-matcher and the downstream topic-tree game. Generated in two stages:
+- **Stage 1 (initial)**: after match evaluation (Section 4.1), based on Profile A analysis
+- **Stage 2 (enriched)**: after conversation report (Section 5 Step 6), with dialogue evidence
+
+```json
+{
+  "requestId": "hs_{timestamp_ms}",
+  "handshakeId": "handshake_{own_peer_id}_{peer_id}_{timestamp_ms}",
+  "userAId": "<own_peer_id>",
+  "userBId": "<peer_id>",
+  "purpose": "friend",
+  "stage": "initial",
+  "bootstrap": {
+    "mode": "seeded",
+    "source": "profile_match",
+    "seedBranches": [
+      {
+        "seedId": "seed_1",
+        "topic": "distributed systems",
+        "parentSeedId": null,
+        "state": "detected",
+        "initiatedBy": "both",
+        "memoryTierUsed": "t1",
+        "matchDimension": "intellectual_resonance",
+        "summaryA": "A's matchmaker sees shared interest in P2P architecture",
+        "summaryB": "B's matchmaker notes their owner also builds distributed tools",
+        "dialogueSeed": [
+          { "speaker": "claw_a", "text": "My person has been deep into P2P protocol design lately" },
+          { "speaker": "claw_b", "text": "Mine too — they've been exploring gossip-based discovery" }
+        ],
+        "evidence": [
+          {
+            "sourceType": "profile_match",
+            "sourceRefId": "profile_a_interest_distributed_systems",
+            "occurredAt": "2026-03-07T00:25:00Z"
+          }
+        ],
+        "confidence": 0.75
+      }
+    ]
+  },
+  "matchSummary": {
+    "score": 8,
+    "dimensionScores": {
+      "emotional_alignment": { "depth": 0, "level": "unknown" },
+      "intellectual_resonance": { "depth": 0, "level": "high" },
+      "value_compatibility": { "depth": 0, "level": "high" },
+      "growth_potential": { "depth": 0, "level": "moderate" },
+      "communication_style_fit": { "depth": 0, "level": "high" }
+    }
+  },
+  "createdAt": "2026-03-07T00:25:00Z",
+  "enrichedAt": null
+}
+```
+
+### Field Reference
+
+| Field | Description |
+|-------|-------------|
+| `stage` | `"initial"` = Profile A analysis only; `"enriched"` = includes conversation evidence |
+| `bootstrap.source` | `"profile_match"` for Stage 1; `"conversation"` for Stage 2 |
+| `seedBranches[].state` | `"detected"` → found in Profile A; `"explored"` → discussed in conversation; `"resonance"` → mutual interest confirmed |
+| `seedBranches[].memoryTierUsed` | `"t1"` = from Profile A (public); `"t2"` = discovered through conversation (private-tier info) |
+| `seedBranches[].matchDimension` | Which of the 5 matching dimensions this seed primarily relates to (optional) |
+| `seedBranches[].confidence` | Stage 1: estimated from match eval ("High"→0.8, "Moderate"→0.6, "Low"→0.3); Stage 2: `depth / 5` from criteria tracking |
+| `seedBranches[].dialogueSeed` | Stage 1: agent-generated opener; Stage 2: actual conversation excerpt |
+| `seedBranches[].evidence` | Stage 1: `sourceType: "profile_match"`; Stage 2: adds `sourceType: "chat_message"` with message refs |
+| `matchSummary.dimensionScores[].depth` | Stage 1: all 0; Stage 2: from criteria tracking (0-5) |
+| `matchSummary.dimensionScores[].level` | From match evaluation: "high", "moderate", "low", "unknown" |
+
+### Stage 2 Enrichment Rules
+
+When enriching from initial → enriched:
+1. Update `stage` → `"enriched"`, `bootstrap.source` → `"conversation"`, set `enrichedAt`
+2. For existing seeds discussed in conversation: `state` → `"explored"` or `"resonance"`, add chat_message evidence, replace generated dialogueSeed with real excerpts, update confidence to `depth/5`
+3. Add NEW seeds for topics discovered during conversation not in Profile A: set `memoryTierUsed: "t2"`, `state: "explored"` or `"resonance"`
+4. Update `matchSummary.dimensionScores` with final depth values from `criteria/{peer_id}.json`

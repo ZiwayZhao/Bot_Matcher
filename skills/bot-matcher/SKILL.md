@@ -315,6 +315,29 @@ Also append to local conversation log:
 echo '{"role":"self","content":"<opener>","timestamp":"<ISO>"}' >> ~/.bot-matcher/conversations/{peer_id}.jsonl
 ```
 
+### 4.1 Generate Initial Handshake (Stage 1)
+
+After saving the match result and before starting conversation, generate the handshake file for the downstream topic-tree system.
+
+1. Read the match result (`~/.bot-matcher/matches/{peer_id}.md`)
+2. Read both Profile A files: own (`~/.bot-matcher/profile_public.md`) and peer's (`~/.bot-matcher/inbox/{peer_id}.md`)
+3. Identify shared topics/interests from Profile A comparison — each becomes a `seedBranch`
+4. For each shared topic, create a seed:
+   - `state`: `"detected"` (only seen in profiles, not yet discussed)
+   - `memoryTierUsed`: `"t1"` (from public Profile A)
+   - `confidence`: estimate from match evaluation ("High" → 0.8, "Moderate" → 0.6, "Low" → 0.3)
+   - `matchDimension`: which of the 5 dimensions this topic primarily relates to
+   - `dialogueSeed`: generate 1 matchmaker exchange showing how to open this topic
+   - `evidence`: reference the profile field where overlap was found (`sourceType: "profile_match"`)
+5. Populate `matchSummary` from the match evaluation scores (all dimension depths = 0 at this stage)
+6. Create directory and write: `~/.bot-matcher/handshakes/{peer_id}.json`
+
+```bash
+mkdir -p ~/.bot-matcher/handshakes
+```
+
+Refer to `{baseDir}/references/schemas.md` Section 10 for the exact JSON schema and field reference.
+
 ---
 
 ## 5. Agent Conversation (Matchmaker Protocol)
@@ -406,7 +429,33 @@ Update `criteria/{peer_id}.json`:
 Instead of a normal message:
 1. Send a polite closing message thanking the other matchmaker
 2. Generate `~/.bot-matcher/conversations/{peer_id}_report.md` (see `{baseDir}/references/schemas.md` Section 9 for format)
-3. Notify the human owner with the report summary and recommendation
+3. Enrich the handshake (Stage 2) — see below
+4. Notify the human owner with the report summary and recommendation
+
+### Step 6.1: Enrich Handshake (Stage 2)
+
+After generating the conversation report, update the handshake with conversation evidence:
+
+1. Read `~/.bot-matcher/handshakes/{peer_id}.json` (the initial handshake from Section 4.1)
+2. Read `~/.bot-matcher/criteria/{peer_id}.json` (final dimension depths and notes)
+3. Read `~/.bot-matcher/conversations/{peer_id}.jsonl` (full conversation history)
+4. **Update existing seedBranches** (topics from Stage 1 that were discussed):
+   - `state` → `"explored"` if mentioned, `"resonance"` if mutual interest confirmed
+   - Add `evidence` entries: `{"sourceType": "chat_message", "sourceRefId": "msg_{turn}", "occurredAt": "{timestamp}"}`
+   - Replace generated `dialogueSeed` with actual conversation excerpts about this topic
+   - Update `confidence` to `depth / 5` (from criteria tracking)
+5. **Add NEW seedBranches** for topics discovered during conversation that weren't in Profile A:
+   - `memoryTierUsed`: `"t2"` (discovered through private-tier conversation)
+   - `state`: `"explored"` or `"resonance"`
+   - Extract relevant dialogue excerpts as `dialogueSeed`
+6. **Update metadata**:
+   - `stage` → `"enriched"`
+   - `bootstrap.source` → `"conversation"`
+   - `enrichedAt` → current ISO timestamp
+   - `matchSummary.dimensionScores` → update all depths from criteria tracking
+7. Overwrite `~/.bot-matcher/handshakes/{peer_id}.json`
+
+Refer to `{baseDir}/references/schemas.md` Section 10 for field reference and enrichment rules.
 
 ### Human control
 
