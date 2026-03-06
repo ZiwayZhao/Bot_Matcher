@@ -287,66 +287,104 @@ echo '{"role":"self","content":"<opener>","timestamp":"<ISO>"}' >> ~/.bot-matche
 
 ---
 
-## 5. Agent Conversation
+## 5. Agent Conversation (Matchmaker Protocol)
 
-After matching, two agents converse to explore the connection deeper.
+After matching, two agents converse **as matchmakers** investigating compatibility on behalf of their owners. Each agent acts as a 媒人 (mediator), not as the owner themselves.
 
-### Sending a message
+### Before your FIRST conversation turn with a peer
 
-**Step 1: Get the peer's address**
-- Read `~/.bot-matcher/peers.json`
-- Find the entry for `{peer_id}` (e.g., `agent_dl`)
-- Extract the `address` field (e.g., `https://heart-list-vid-atmospheric.trycloudflare.com`)
+1. Read the conversation guide: `{baseDir}/references/conversation_prompt.md`
+2. Read the match result: `~/.bot-matcher/matches/{peer_id}.md`
+3. Initialize the criteria tracking file:
 
-**Step 2: Craft the message**
-- Read the peer's Profile A from `~/.bot-matcher/inbox/{peer_id}.md`
-- Read your own Profile B from `~/.bot-matcher/profile_private.md`
-- Generate a conversational response that explores common ground
-
-**Step 3: Send the message**
 ```bash
-python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<your_message_content>"
+mkdir -p ~/.bot-matcher/criteria
 ```
 
-**Example:**
-```bash
-python3 {baseDir}/scripts/send_message.py https://heart-list-vid-atmospheric.trycloudflare.com ziway_test "I'm fascinated by your approach to P2P systems. How do you handle consensus in a decentralized setting?"
-```
-
-**Step 4: Log the message locally**
-After successful send, append to `~/.bot-matcher/conversations/{peer_id}.jsonl`:
+Write `~/.bot-matcher/criteria/{peer_id}.json`:
 ```json
-{"role": "self", "content": "<your_message_content>", "timestamp": "<ISO>"}
+{
+  "peer_id": "{peer_id}",
+  "phase": "icebreak",
+  "turn_count": 0,
+  "dimensions": {
+    "emotional_alignment": {"depth": 0, "notes": []},
+    "intellectual_resonance": {"depth": 0, "notes": []},
+    "value_compatibility": {"depth": 0, "notes": []},
+    "growth_potential": {"depth": 0, "notes": []},
+    "communication_style_fit": {"depth": 0, "notes": []}
+  },
+  "last_probed_dimension": null,
+  "topics_explored": [],
+  "topics_to_explore": []
+}
 ```
 
-### Receiving messages
+### For EVERY conversation turn: 6-step loop
 
-When `check_inbox.py` reports new messages, read them and respond:
+**Step 1: Load state**
+- Read `~/.bot-matcher/criteria/{peer_id}.json`
+- Read `~/.bot-matcher/conversations/{peer_id}.jsonl` (full history)
+- Read `~/.bot-matcher/inbox/{peer_id}.md` (their Profile A)
+- Read `~/.bot-matcher/profile_private.md` (your Profile B)
+- If first turn this session, also re-read `{baseDir}/references/conversation_prompt.md`
 
-1. Read the full conversation from `~/.bot-matcher/conversations/{peer_id}.jsonl`
-2. Read the peer's Profile A from `~/.bot-matcher/inbox/{peer_id}.md`
-3. Read your own Profile B from `~/.bot-matcher/profile_private.md`
-4. Craft a response that:
-   - Builds on the common ground identified in the match
-   - Explores bridge_nodes and adjacent_possible areas
-   - Represents your owner's perspective and interests authentically
-   - Stays conversational and genuine, not robotic
-5. Send the response and log it
+**Step 2: Process incoming message** (if responding to a received message)
+- Parse the peer's latest message
+- Extract information relevant to the 5 matching dimensions
+- Update `criteria/{peer_id}.json`: increment depth and append notes for any dimension touched
+- Append the incoming message to conversation log:
+```
+echo '{"role":"{peer_id}","content":"<message>","timestamp":"<ISO>"}' >> ~/.bot-matcher/conversations/{peer_id}.jsonl
+```
 
-### Conversation guidelines
+**Step 3: Determine phase and target dimension**
+- Calculate phase from `turn_count` (see `conversation_prompt.md` phase definitions)
+- **icebreak** (turns 1-2): introduce as matchmaker, find one common ground point
+- **explore** (turns 3-5): pick the dimension with `depth == 0` (unexplored)
+- **deep_dive** (turns 6-8): pick the dimension with highest depth (most promising)
+- **report** (turns 9-10): summarize and generate report
+- Avoid probing the same dimension as `last_probed_dimension` unless in deep_dive
 
-- Keep messages concise (2-4 sentences per turn)
-- Ask specific questions, not generic ones
-- Reference concrete details from the peer's profile
-- After 5-6 exchanges, summarize findings for the human owner
-- Use the language that matches the conversation context
+**Step 4: Compose your message**
+Follow the matchmaker persona and rules from `conversation_prompt.md`:
+- Always speak as a matchmaker, in third person about your owner
+- Reference something concrete from the peer's profile or previous messages
+- Target the dimension chosen in Step 3
+- Keep to 2-4 sentences
+- Alternate between sharing info about your owner and asking questions
+
+**Step 5: Send, log, and update tracking**
+
+Get the peer's address from `~/.bot-matcher/peers.json`:
+```bash
+python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<your_message>"
+```
+
+Append to conversation log:
+```
+echo '{"role":"self","content":"<message>","timestamp":"<ISO>"}' >> ~/.bot-matcher/conversations/{peer_id}.jsonl
+```
+
+Update `criteria/{peer_id}.json`:
+- Increment `turn_count`
+- Set `last_probed_dimension` to the dimension you targeted
+- Update `phase` if the turn count crosses a phase boundary
+
+**Step 6: Report phase** (when `turn_count` reaches 9)
+
+Instead of a normal message:
+1. Send a polite closing message thanking the other matchmaker
+2. Generate `~/.bot-matcher/conversations/{peer_id}_report.md` (see `{baseDir}/references/schemas.md` Section 9 for format)
+3. Notify the human owner with the report summary and recommendation
 
 ### Human control
 
 The human owner can:
 - **Watch**: `read_file("~/.bot-matcher/conversations/{peer_id}.jsonl")` — show conversation
-- **Stop**: User says "stop conversation with {peer_id}" → send a polite goodbye, stop messaging
-- **Join**: User says "I want to talk to {peer_id}" → switch from agent-to-agent to human-in-the-loop
+- **Check progress**: `read_file("~/.bot-matcher/criteria/{peer_id}.json")` — see dimension coverage
+- **Stop**: User says "stop conversation with {peer_id}" → send polite goodbye, generate report early
+- **Join**: User says "I want to talk to {peer_id}" → switch from matchmaker to human-in-the-loop
 - **Pause all**: Set `status` to `"paused"` in config.json → stop processing everything
 
 ---

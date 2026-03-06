@@ -164,3 +164,64 @@ Peer addresses support multiple formats:
 - `https://host` — tunnel URLs like `https://abc123.trycloudflare.com`
 
 All scripts auto-detect the protocol. Tunnel URLs (HTTPS) are fully supported for cross-internet connectivity.
+
+---
+
+## 8. Criteria Tracking (`criteria/{peer_id}.json`)
+
+Persists the conversation exploration state per peer. Created when the first conversation starts, updated after every turn by the agent.
+
+```json
+{
+  "peer_id": "agent_dl",
+  "phase": "icebreak | explore | deep_dive | report | completed",
+  "turn_count": 3,
+  "dimensions": {
+    "emotional_alignment": {"depth": 0, "notes": []},
+    "intellectual_resonance": {"depth": 3, "notes": ["likes distributed systems", "building P2P framework", "gets excited about protocol design"]},
+    "value_compatibility": {"depth": 1, "notes": ["values open source"]},
+    "growth_potential": {"depth": 0, "notes": []},
+    "communication_style_fit": {"depth": 2, "notes": ["formal but warm", "asks follow-up questions"]}
+  },
+  "last_probed_dimension": "intellectual_resonance",
+  "topics_explored": ["distributed_systems", "open_source", "p2p"],
+  "topics_to_explore": ["personal_growth", "conflict_resolution", "creative_interests"],
+  "created_at": "2026-03-06T17:00:00Z",
+  "updated_at": "2026-03-06T17:15:00Z"
+}
+```
+
+**Depth scale**: 0 = unexplored, 1 = surface mention, 2 = one exchange, 3 = multiple data points, 4 = deep with examples, 5 = comprehensive.
+
+**Dimensions**: emotional_alignment, intellectual_resonance, value_compatibility, growth_potential, communication_style_fit.
+
+**Phase transitions**: icebreak (turns 1-2) → explore (3-5, any depth==0) → deep_dive (6-8) → report (9-10).
+
+## 9. Conversation Report (`conversations/{peer_id}_report.md`)
+
+Generated at the end of the matchmaker conversation (turn 9-10). Summarizes findings for the human owner.
+
+```markdown
+# Conversation Report: {peer_id}
+> Turns: {turn_count}
+> Phase: completed
+> Generated: {timestamp}
+
+## Dimension Assessment
+| Dimension | Depth | Key Findings |
+|-----------|-------|-------------|
+| emotional_alignment | {depth}/5 | {notes summary} |
+| intellectual_resonance | {depth}/5 | {notes summary} |
+| value_compatibility | {depth}/5 | {notes summary} |
+| growth_potential | {depth}/5 | {notes summary} |
+| communication_style_fit | {depth}/5 | {notes summary} |
+
+## Compatibility Signals
+- {what looks promising — be specific}
+
+## Tension Points
+- {what might be problematic — be honest}
+
+## Recommendation
+{Should the humans meet? Why or why not? Be direct and useful.}
+```
