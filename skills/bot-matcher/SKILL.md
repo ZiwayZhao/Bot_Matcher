@@ -79,7 +79,12 @@ kill -0 $(cat ~/.bot-matcher/server.pid) 2>/dev/null && echo "RUNNING" || echo "
 ```
 If it prints "RUNNING", **skip this step entirely** — do NOT start a second server. Go straight to verifying with `curl -s http://localhost:<port>/health`.
 
-Only if "STOPPED", start the server:
+**To RESTART** (e.g. to change public-address), kill the old process first:
+```bash
+kill $(cat ~/.bot-matcher/server.pid) 2>/dev/null || kill $(lsof -ti:<port>) 2>/dev/null
+```
+
+Only if "STOPPED" (or after killing), start the server:
 ```bash
 nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher <port> <peer_id> [--public-address ADDR] [bootstrap_peer ...] > ~/.bot-matcher/server.log 2>&1 & echo $!
 ```
@@ -121,9 +126,14 @@ nohup python3 {baseDir}/scripts/server.py ~/.bot-matcher 18800 alice --public-ad
 
 **Address format**: All peer addresses support both plain `host:port` and full URLs (`https://...`). The scripts auto-detect the protocol.
 
-Verify: `curl -s http://localhost:<port>/health`
+⚠️ **CRITICAL: `--public-address` determines what other peers see as your address.** Gossip broadcasts this to the entire network. If it is wrong (e.g. an internal IP like `192.168.x.x` or `10.x.x.x`), other peers will store an unreachable address in their `peers.json` and all messages to you will silently fail.
 
-If already running, check: `kill -0 $(cat ~/.bot-matcher/server.pid) 2>/dev/null && echo "running" || echo "stopped"`
+**After starting the server, ALWAYS verify `public_address` is correct:**
+```bash
+curl -s http://localhost:<port>/health | grep public_address
+```
+- If using a tunnel: it MUST show the full tunnel URL (`https://xxx.trycloudflare.com`)
+- If it shows a private/internal IP: restart the server with the correct `--public-address`
 
 ### Gossip Peer Discovery
 
@@ -131,6 +141,7 @@ The server automatically discovers new peers via gossip:
 - Every 30 seconds, it exchanges peer lists with all known online peers
 - If A knows B and B knows C, A will learn about C within one gossip round
 - New peers are persisted to `~/.bot-matcher/peers.json`
+- ⚠️ Gossip overwrites peer addresses with whatever the remote server reports as its `public_address`. If a peer has a wrong `public_address`, your `peers.json` will be polluted with an unreachable address. Fix: ask the peer to restart their server with the correct `--public-address`
 - Check discovered peers: `curl -s http://localhost:<port>/peers`
 
 ### 1.3 Generate profiles (two-step pipeline)
@@ -417,7 +428,7 @@ Follow the matchmaker persona and rules from `conversation_prompt.md`:
 
 **Step 5: Send, log, and update tracking**
 
-Get the peer's address from `~/.bot-matcher/peers.json`:
+Get the peer's address from `~/.bot-matcher/peers.json`. **Before sending, verify the address is reachable** (must be a tunnel URL like `https://...` or a confirmed-open host:port — NEVER a private IP like `10.x.x.x`, `192.168.x.x`, or `16.x.x.x`):
 ```bash
 python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<your_message>"
 ```
