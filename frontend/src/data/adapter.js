@@ -151,14 +151,14 @@ export function shadowConnectionToTree(connection) {
  * Map notification types to user-friendly messages.
  */
 export function formatNotification(notification) {
-  const icons = {
-    wilt_warning: "🥀",
-    new_tree: "🌱",
-    shadow_tree: "🌫️",
-    resonance_opportunity: "✨",
+  const iconArts = {
+    wilt_warning: "/assets/branches/branch_wilt.png",
+    new_tree: "/assets/branches/branch_sprout.png",
+    shadow_tree: "/assets/branches/branch_sprout.png",
+    resonance_opportunity: "/assets/branches/branch_bloom.png",
   };
   return {
     ...notification,
-    icon: icons[notification.type] || "📌",
+    iconArt: iconArts[notification.type] || "/assets/branches/branch_sprout.png",
   };
 }
