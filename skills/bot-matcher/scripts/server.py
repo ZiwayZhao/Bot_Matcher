@@ -15,6 +15,10 @@ Endpoints:
   GET  /messages?peer=X&since=N  - Fetch messages from a peer since line N
   POST /connect                  - Receive a connection request (triggers shadow tree)
   GET  /connections              - List pending/active connection requests
+  GET  /forest                   - List all trees (handshakes) with status
+  GET  /handshake?peer=X         - Get handshake JSON for a specific peer
+  POST /accept                   - Accept a pending connection (reveal shadow tree)
+  GET  /notifications            - Get proactive watering reminders
 
 Usage:
   python3 server.py <data_dir> <port> <peer_id> [--public-address ADDR]
@@ -276,6 +280,25 @@ class ClawMatchHandler(BaseHTTPRequestHandler):
                 "total": since + len(messages),
             })
 
+        elif path == "/forest":
+            self._handle_forest()
+
+        elif path == "/handshake":
+            params = parse_qs(parsed.query)
+            peer = params.get("peer", [None])[0]
+            if not peer:
+                self._json_response(400, {"error": "missing 'peer' parameter"})
+                return
+            hs_path = self.server.data_dir / "handshakes" / f"{peer}.json"
+            if not hs_path.exists():
+                self._json_response(404, {"error": f"No handshake for {peer}"})
+                return
+            hs = json.loads(hs_path.read_text(encoding="utf-8"))
+            self._json_response(200, hs)
+
+        elif path == "/notifications":
+            self._handle_notifications()
+
         else:
             self._json_response(404, {"error": "not found"})
 
@@ -289,6 +312,8 @@ class ClawMatchHandler(BaseHTTPRequestHandler):
             self._handle_message()
         elif path == "/connect":
             self._handle_connect()
+        elif path == "/accept":
+            self._handle_accept()
         else:
             self._json_response(404, {"error": "not found"})
 
@@ -391,6 +416,163 @@ class ClawMatchHandler(BaseHTTPRequestHandler):
             self._json_response(200, {"status": "received"})
         except (json.JSONDecodeError, ValueError) as e:
             self._json_response(400, {"error": str(e)})
+
+    def _handle_accept(self):
+        """Accept a pending connection — reveal the shadow tree."""
+        try:
+            body = self._read_body()
+            peer_id = body.get("peer_id")
+            if not peer_id:
+                self._json_response(400, {"error": "missing peer_id"})
+                return
+
+            record = self.server.connection_manager.accept(peer_id)
+            if not record:
+                self._json_response(404, {"error": f"No pending connection from {peer_id}"})
+                return
+
+            # Also update handshake visibility if it exists
+            hs_path = self.server.data_dir / "handshakes" / f"{peer_id}.json"
+            if hs_path.exists():
+                hs = json.loads(hs_path.read_text(encoding="utf-8"))
+                hs["visibility"]["sideB"] = "revealed"
+                hs_path.write_text(
+                    json.dumps(hs, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
+
+            _log(f"Connection accepted: {peer_id} — tree revealed!")
+
+            self._json_response(200, {
+                "status": "accepted",
+                "peer_id": peer_id,
+                "visibility": "revealed",
+                "message": f"Your tree with {peer_id} has been revealed!",
+            })
+        except (json.JSONDecodeError, ValueError) as e:
+            self._json_response(400, {"error": str(e)})
+
+    def _handle_forest(self):
+        """Return all trees (handshakes) with summary info for the frontend."""
+        hs_dir = self.server.data_dir / "handshakes"
+        trees = []
+        if hs_dir.exists():
+            for hs_file in sorted(hs_dir.glob("*.json")):
+                try:
+                    hs = json.loads(hs_file.read_text(encoding="utf-8"))
+                    branches = hs.get("bootstrap", {}).get("seedBranches", [])
+                    trees.append({
+                        "peer_id": hs_file.stem,
+                        "handshakeId": hs.get("handshakeId"),
+                        "stage": hs.get("stage", "initial"),
+                        "visibility": hs.get("visibility", {}),
+                        "branch_count": len(branches),
+                        "topics": [b.get("topic", "") for b in branches],
+                        "match_score": hs.get("matchSummary", {}).get("score"),
+                        "createdAt": hs.get("createdAt"),
+                        "enrichedAt": hs.get("enrichedAt"),
+                        "lastWateredAt": hs.get("lastWateredAt"),
+                    })
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+        # Also include shadow trees from pending connections without handshakes
+        connections = self.server.connection_manager.get_all()
+        hs_peers = {t["peer_id"] for t in trees}
+        for peer_id, conn in connections.items():
+            if peer_id not in hs_peers and conn.get("status") == "pending":
+                trees.append({
+                    "peer_id": peer_id,
+                    "handshakeId": None,
+                    "stage": "shadow",
+                    "visibility": {"sideA": "unknown", "sideB": "shadow"},
+                    "branch_count": 0,
+                    "topics": [],
+                    "match_score": None,
+                    "createdAt": conn.get("received_at"),
+                    "enrichedAt": None,
+                    "lastWateredAt": None,
+                })
+
+        self._json_response(200, {"trees": trees, "count": len(trees)})
+
+    def _handle_notifications(self):
+        """Run check_trees logic inline and return notifications."""
+        from datetime import timedelta
+        hs_dir = self.server.data_dir / "handshakes"
+        now = datetime.now(timezone.utc)
+        notifications = []
+
+        if hs_dir.exists():
+            for hs_file in hs_dir.glob("*.json"):
+                try:
+                    peer_id = hs_file.stem
+                    hs = json.loads(hs_file.read_text(encoding="utf-8"))
+                    vis = hs.get("visibility", {})
+
+                    if vis.get("sideB") != "revealed":
+                        continue
+
+                    created_at = self._parse_iso(hs.get("createdAt"))
+                    last_watered = self._parse_iso(hs.get("lastWateredAt"))
+                    branches = hs.get("bootstrap", {}).get("seedBranches", [])
+
+                    # New tree (< 3 days, no watering)
+                    if created_at and (now - created_at) < timedelta(days=3) and not last_watered:
+                        topics = [b.get("topic", "?") for b in branches[:3]]
+                        notifications.append({
+                            "type": "new_tree", "peer_id": peer_id,
+                            "priority": "medium",
+                            "message": f"Your new tree with {peer_id} just sprouted!",
+                            "suggested_topics": topics,
+                        })
+                        continue
+
+                    for branch in branches:
+                        topic = branch.get("topic", "unknown")
+                        state = branch.get("state", "detected")
+                        confidence = branch.get("confidence", 0)
+                        last_int = self._parse_iso(branch.get("last_interaction")) or created_at
+
+                        if last_int and (now - last_int) > timedelta(days=7):
+                            notifications.append({
+                                "type": "wilt_warning", "peer_id": peer_id,
+                                "topic": topic, "priority": "high",
+                                "message": f"Your {topic} branch with {peer_id} is wilting!",
+                                "days_since_interaction": (now - last_int).days,
+                            })
+                        elif state == "resonance" and confidence >= 0.8:
+                            notifications.append({
+                                "type": "resonance_opportunity", "peer_id": peer_id,
+                                "topic": topic, "priority": "low",
+                                "message": f"You and {peer_id} click on {topic}!",
+                            })
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+        # Shadow trees
+        for peer_id, conn in self.server.connection_manager.get_all().items():
+            if conn.get("status") == "pending":
+                notifications.append({
+                    "type": "shadow_tree", "peer_id": peer_id,
+                    "priority": "medium",
+                    "message": f"A mysterious tree from {peer_id}... Reveal it?",
+                })
+
+        self._json_response(200, {
+            "notifications": notifications,
+            "count": len(notifications),
+        })
+
+    @staticmethod
+    def _parse_iso(ts: str | None) -> datetime | None:
+        if not ts:
+            return None
+        try:
+            if ts.endswith("Z"):
+                ts = ts[:-1] + "+00:00"
+            return datetime.fromisoformat(ts)
+        except (ValueError, TypeError):
+            return None
 
     def _read_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))

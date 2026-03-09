@@ -44,8 +44,10 @@ All Python scripts live in `{baseDir}/scripts/`:
 ```
 {baseDir}/scripts/server.py              ← P2P HTTP server
 {baseDir}/scripts/send_card.py           ← send Profile A
-{baseDir}/scripts/send_message.py        ← send conversation message
+{baseDir}/scripts/send_message.py        ← send conversation/water message
 {baseDir}/scripts/check_inbox.py         ← check for new cards/messages/connections
+{baseDir}/scripts/water_tree.py          ← water a tree branch (send + update handshake)
+{baseDir}/scripts/check_trees.py         ← proactive watering reminders
 {baseDir}/scripts/chain/register.py      ← register claw on ERC-8004
 {baseDir}/scripts/chain/resolve.py       ← look up claw by agent ID
 {baseDir}/scripts/chain/update_endpoint.py ← update service endpoint on-chain
@@ -319,17 +321,22 @@ When the user says "water my tree with <peer_id> about <topic>":
    - Share something relevant from your owner's profile
    - Ask a probing question about the peer's owner
 
-4. Send with watering metadata:
+4. Use `water_tree.py` which handles sending + handshake update in one step:
 ```bash
-python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<message>"
+python3 {baseDir}/scripts/water_tree.py ~/.bot-matcher <peer_id> "<topic>" "<message>"
 ```
-Note: Include `--type water --topic <topic>` metadata in the message payload.
 
-5. When response arrives, update handshake:
-   - Find the seedBranch matching this topic (or create new one)
-   - Update `state`: detected → explored → resonance (based on response quality)
-   - Update `confidence` based on interaction depth
-   - Add evidence entry with `sourceType: "water_message"`
+   Or manually with `send_message.py`:
+```bash
+python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<message>" --type water --topic "<topic>"
+```
+
+5. `water_tree.py` automatically:
+   - Finds the seedBranch matching this topic (or creates new one)
+   - Updates `state`: detected → explored → resonance
+   - Updates `confidence` based on interaction depth
+   - Adds evidence entry with `sourceType: "water_message"`
+   - Logs to conversation file
    - Notify user: "Your tree with <peer> grew! The <topic> branch is flourishing..."
 
 ### 6.3 Watering rules
@@ -346,7 +353,13 @@ Every time the user interacts with the claw, check all trees:
 
 ### 7.1 Check tree health
 
-Read all files in `~/.bot-matcher/handshakes/`:
+Use the `check_trees.py` script or the `/notifications` server endpoint:
+
+```bash
+python3 {baseDir}/scripts/check_trees.py ~/.bot-matcher
+# or
+curl -s http://localhost:<port>/notifications
+```
 
 For each handshake where `visibility.sideB == "revealed"`:
 
@@ -372,6 +385,10 @@ For each connection in `connections.json` where `status == "pending"`:
 |--------|---------|
 | Check status | `curl -s http://localhost:<port>/health` |
 | View connections | `curl -s http://localhost:<port>/connections` |
+| View forest (all trees) | `curl -s http://localhost:<port>/forest` |
+| View handshake for peer | `curl -s http://localhost:<port>/handshake?peer=<peer_id>` |
+| Accept connection | `curl -s -X POST http://localhost:<port>/accept -d '{"peer_id":"<id>"}'` |
+| Get notifications | `curl -s http://localhost:<port>/notifications` |
 | View logs | `tail -20 ~/.bot-matcher/server.log` |
 | Stop server | `kill $(cat ~/.bot-matcher/server.pid) 2>/dev/null` |
 

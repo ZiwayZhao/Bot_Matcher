@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -531,6 +532,432 @@ class TestConnectionManager(unittest.TestCase):
         self.assertTrue(conn_file.exists())
         data = json.loads(conn_file.read_text())
         self.assertIn("peer_f", data)
+
+
+class TestWaterTree(unittest.TestCase):
+    """Test water_tree.py watering flow."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="clawmatch_water_"))
+        for sub in ("handshakes", "conversations", "peers", "messages"):
+            (self.tmpdir / sub).mkdir(exist_ok=True)
+
+        # Create a revealed handshake
+        self.handshake = {
+            "handshakeId": "hs_test_water",
+            "userAId": "alice",
+            "userBId": "bob",
+            "purpose": "friend",
+            "stage": "enriched",
+            "visibility": {"sideA": "revealed", "sideB": "revealed"},
+            "bootstrap": {
+                "mode": "seeded",
+                "source": "conversation",
+                "seedBranches": [
+                    {
+                        "seedId": "seed_1",
+                        "topic": "climbing",
+                        "parentSeedId": None,
+                        "state": "explored",
+                        "initiatedBy": "both",
+                        "memoryTierUsed": "t1",
+                        "matchDimension": "intellectual_resonance",
+                        "summaryA": "Both enjoy climbing",
+                        "summaryB": None,
+                        "dialogueSeed": [],
+                        "evidence": [{"sourceType": "profile_match", "occurredAt": "2026-03-07T00:00:00Z"}],
+                        "confidence": 0.6,
+                    }
+                ],
+            },
+            "matchSummary": {"score": 7},
+            "createdAt": "2026-03-07T00:00:00Z",
+            "enrichedAt": "2026-03-07T01:00:00Z",
+        }
+        (self.tmpdir / "handshakes" / "bob.json").write_text(
+            json.dumps(self.handshake, indent=2)
+        )
+        (self.tmpdir / "config.json").write_text(
+            json.dumps({"peer_id": "alice", "port": 18800})
+        )
+
+    def test_prerequisites_both_revealed(self):
+        """Watering allowed when both sides revealed."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from water_tree import check_prerequisites
+        ok, reason = check_prerequisites(self.tmpdir, "bob")
+        self.assertTrue(ok)
+
+    def test_prerequisites_shadow_blocked(self):
+        """Watering blocked when side B is shadow."""
+        hs = self.handshake.copy()
+        hs["visibility"] = {"sideA": "revealed", "sideB": "shadow"}
+        (self.tmpdir / "handshakes" / "bob.json").write_text(json.dumps(hs))
+
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from water_tree import check_prerequisites
+        ok, reason = check_prerequisites(self.tmpdir, "bob")
+        self.assertFalse(ok)
+        self.assertIn("accept", reason.lower())
+
+    def test_prerequisites_no_handshake(self):
+        """Watering blocked when no handshake exists."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from water_tree import check_prerequisites
+        ok, reason = check_prerequisites(self.tmpdir, "nonexistent")
+        self.assertFalse(ok)
+
+    def test_find_existing_branch(self):
+        """Find existing branch by topic name."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from water_tree import find_or_create_branch
+        branch, is_new = find_or_create_branch(self.handshake, "climbing")
+        self.assertFalse(is_new)
+        self.assertEqual(branch["topic"], "climbing")
+
+    def test_create_new_branch(self):
+        """Create new branch for unknown topic."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from water_tree import find_or_create_branch
+        branch, is_new = find_or_create_branch(self.handshake, "cooking")
+        self.assertTrue(is_new)
+        self.assertEqual(branch["topic"], "cooking")
+        self.assertEqual(branch["memoryTierUsed"], "t2")
+
+    def test_update_branch_state_progression(self):
+        """Branch state progresses: detected → explored → resonance."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from water_tree import update_branch_after_water
+
+        branch = {"state": "detected", "evidence": [], "dialogueSeed": [], "confidence": 0.3}
+        branch = update_branch_after_water(branch, "alice", "test msg")
+        self.assertEqual(branch["state"], "explored")
+
+        branch = update_branch_after_water(branch, "alice", "more", "a detailed response here!!")
+        self.assertEqual(branch["state"], "resonance")
+
+    def test_update_branch_confidence(self):
+        """Confidence increases with watering."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from water_tree import update_branch_after_water
+
+        branch = {"state": "detected", "evidence": [], "dialogueSeed": [], "confidence": 0.3}
+        branch = update_branch_after_water(branch, "alice", "msg1")
+        self.assertGreater(branch["confidence"], 0.3)
+        c1 = branch["confidence"]
+        branch = update_branch_after_water(branch, "alice", "msg2")
+        self.assertGreater(branch["confidence"], c1)
+
+
+class TestCheckTrees(unittest.TestCase):
+    """Test check_trees.py proactive reminders."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="clawmatch_trees_"))
+        (self.tmpdir / "handshakes").mkdir()
+
+    def _write_handshake(self, peer_id, visibility_b="revealed",
+                         created_days_ago=1, last_watered=None,
+                         branches=None):
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        hs = {
+            "visibility": {"sideA": "revealed", "sideB": visibility_b},
+            "bootstrap": {"seedBranches": branches or []},
+            "createdAt": (now - timedelta(days=created_days_ago)).isoformat(),
+            "lastWateredAt": last_watered,
+        }
+        (self.tmpdir / "handshakes" / f"{peer_id}.json").write_text(
+            json.dumps(hs, indent=2)
+        )
+
+    def test_empty_forest(self):
+        """No notifications when no trees."""
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "check_trees.py"), str(self.tmpdir)],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["notification_count"], 0)
+
+    def test_new_tree_notification(self):
+        """New tree (< 3 days, no watering) triggers notification."""
+        self._write_handshake("peer_new", created_days_ago=1, last_watered=None,
+                              branches=[{"topic": "music", "state": "detected"}])
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "check_trees.py"), str(self.tmpdir)],
+            capture_output=True, text=True,
+        )
+        data = json.loads(result.stdout)
+        self.assertEqual(data["notification_count"], 1)
+        self.assertEqual(data["notifications"][0]["type"], "new_tree")
+
+    def test_wilt_warning(self):
+        """Branch with old last_interaction triggers wilt warning."""
+        from datetime import timedelta
+        old_time = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        self._write_handshake("peer_old", created_days_ago=15,
+                              last_watered=old_time,
+                              branches=[{
+                                  "topic": "climbing",
+                                  "state": "explored",
+                                  "confidence": 0.5,
+                                  "last_interaction": old_time,
+                              }])
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "check_trees.py"), str(self.tmpdir)],
+            capture_output=True, text=True,
+        )
+        data = json.loads(result.stdout)
+        wilt = [n for n in data["notifications"] if n["type"] == "wilt_warning"]
+        self.assertEqual(len(wilt), 1)
+        self.assertGreaterEqual(wilt[0]["days_since_interaction"], 10)
+
+    def test_shadow_tree_notification(self):
+        """Pending connection triggers shadow tree notification."""
+        connections = {
+            "peer_shadow": {
+                "from_peer": "peer_shadow",
+                "status": "pending",
+                "agent_id": 42,
+                "address": "localhost:18800",
+                "received_at": "2026-03-09T00:00:00Z",
+            }
+        }
+        (self.tmpdir / "connections.json").write_text(json.dumps(connections))
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "check_trees.py"), str(self.tmpdir)],
+            capture_output=True, text=True,
+        )
+        data = json.loads(result.stdout)
+        shadow = [n for n in data["notifications"] if n["type"] == "shadow_tree"]
+        self.assertEqual(len(shadow), 1)
+
+    def test_resonance_opportunity(self):
+        """High-confidence resonance branch triggers opportunity."""
+        self._write_handshake("peer_res", created_days_ago=10,
+                              last_watered="2026-03-08T00:00:00Z",
+                              branches=[{
+                                  "topic": "P2P",
+                                  "state": "resonance",
+                                  "confidence": 0.9,
+                                  "last_interaction": datetime.now(timezone.utc).isoformat(),
+                              }])
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "check_trees.py"), str(self.tmpdir)],
+            capture_output=True, text=True,
+        )
+        data = json.loads(result.stdout)
+        res = [n for n in data["notifications"] if n["type"] == "resonance_opportunity"]
+        self.assertEqual(len(res), 1)
+
+    def test_shadow_tree_not_checked_for_watering(self):
+        """Shadow trees (visibility.sideB != revealed) skip watering checks."""
+        self._write_handshake("peer_shadow_hs", visibility_b="shadow",
+                              created_days_ago=10,
+                              branches=[{"topic": "x", "state": "detected"}])
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "check_trees.py"), str(self.tmpdir)],
+            capture_output=True, text=True,
+        )
+        data = json.loads(result.stdout)
+        # No wilt/new_tree for shadow trees
+        for n in data["notifications"]:
+            self.assertNotEqual(n["type"], "wilt_warning")
+            self.assertNotEqual(n["type"], "new_tree")
+
+
+class TestServerForestEndpoints(unittest.TestCase):
+    """Test new server endpoints: /forest, /handshake, /accept, /notifications."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = Path(tempfile.mkdtemp(prefix="clawmatch_forest_"))
+        cls.port = 19902
+        cls.peer_id = "forest_test"
+
+        kill_server(cls.tmpdir, cls.port)
+
+        (cls.tmpdir / "profile_public.md").write_text("# Profile: forest_test\n## Interests\n- trees")
+
+        # Create a handshake
+        (cls.tmpdir / "handshakes").mkdir(exist_ok=True)
+        hs = {
+            "handshakeId": "hs_forest_test",
+            "userAId": "forest_test",
+            "userBId": "peer_x",
+            "stage": "enriched",
+            "visibility": {"sideA": "revealed", "sideB": "shadow"},
+            "bootstrap": {
+                "mode": "seeded",
+                "source": "conversation",
+                "seedBranches": [
+                    {"seedId": "s1", "topic": "music", "state": "explored", "confidence": 0.6},
+                ],
+            },
+            "matchSummary": {"score": 7},
+            "createdAt": "2026-03-07T00:00:00Z",
+            "enrichedAt": "2026-03-07T01:00:00Z",
+        }
+        (cls.tmpdir / "handshakes" / "peer_x.json").write_text(json.dumps(hs, indent=2))
+
+        cls.proc = subprocess.Popen(
+            [
+                sys.executable, str(SERVER_SCRIPT),
+                str(cls.tmpdir), str(cls.port), cls.peer_id,
+                "--public-address", f"localhost:{cls.port}",
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        if not wait_for_server(cls.port):
+            cls.proc.kill()
+            raise RuntimeError("Server failed to start")
+
+    @classmethod
+    def tearDownClass(cls):
+        kill_server(cls.tmpdir, cls.port)
+        cls.proc.kill()
+        cls.proc.wait()
+
+    def _get(self, path: str) -> dict:
+        req = Request(f"http://localhost:{self.port}{path}", method="GET")
+        with urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read())
+
+    def _post(self, path: str, data: dict) -> dict:
+        payload = json.dumps(data).encode("utf-8")
+        req = Request(
+            f"http://localhost:{self.port}{path}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read())
+
+    def test_forest_lists_trees(self):
+        """GET /forest returns all trees."""
+        data = self._get("/forest")
+        self.assertGreaterEqual(data["count"], 1)
+        tree = [t for t in data["trees"] if t["peer_id"] == "peer_x"][0]
+        self.assertEqual(tree["stage"], "enriched")
+        self.assertIn("music", tree["topics"])
+
+    def test_handshake_endpoint(self):
+        """GET /handshake?peer=X returns full handshake."""
+        data = self._get("/handshake?peer=peer_x")
+        self.assertEqual(data["handshakeId"], "hs_forest_test")
+        self.assertEqual(data["visibility"]["sideB"], "shadow")
+
+    def test_handshake_not_found(self):
+        """GET /handshake?peer=nonexistent returns 404."""
+        try:
+            self._get("/handshake?peer=nonexistent")
+            self.fail("Should have returned 404")
+        except Exception as e:
+            self.assertIn("404", str(e))
+
+    def test_accept_connection(self):
+        """POST /accept reveals the shadow tree."""
+        # First create a pending connection
+        self._post("/connect", {
+            "peer_id": "peer_accept_test",
+            "address": "localhost:19999",
+            "agent_id": 99,
+        })
+
+        # Create a handshake for this peer too
+        hs = {
+            "handshakeId": "hs_accept_test",
+            "visibility": {"sideA": "revealed", "sideB": "shadow"},
+            "bootstrap": {"seedBranches": []},
+        }
+        (self.tmpdir / "handshakes" / "peer_accept_test.json").write_text(json.dumps(hs))
+
+        # Accept
+        result = self._post("/accept", {"peer_id": "peer_accept_test"})
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(result["visibility"], "revealed")
+
+        # Verify handshake updated
+        hs_data = self._get("/handshake?peer=peer_accept_test")
+        self.assertEqual(hs_data["visibility"]["sideB"], "revealed")
+
+        # Verify connection updated
+        conns = self._get("/connections")
+        self.assertEqual(conns["connections"]["peer_accept_test"]["status"], "accepted")
+
+    def test_notifications_endpoint(self):
+        """GET /notifications returns notification list."""
+        data = self._get("/notifications")
+        self.assertIn("notifications", data)
+        self.assertIn("count", data)
+
+    def test_forest_includes_shadow_connections(self):
+        """Forest includes pending connections without handshakes."""
+        # Create a pending connection without handshake
+        self._post("/connect", {
+            "peer_id": "peer_no_hs",
+            "address": "localhost:19998",
+        })
+        data = self._get("/forest")
+        shadow = [t for t in data["trees"] if t["peer_id"] == "peer_no_hs"]
+        self.assertEqual(len(shadow), 1)
+        self.assertEqual(shadow[0]["stage"], "shadow")
+
+
+class TestSendMessageWatering(unittest.TestCase):
+    """Test send_message.py with watering flags."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = Path(tempfile.mkdtemp(prefix="clawmatch_sendmsg_"))
+        cls.port = 19903
+        cls.peer_id = "msg_test"
+
+        kill_server(cls.tmpdir, cls.port)
+
+        (cls.tmpdir / "profile_public.md").write_text("# Profile: msg_test")
+
+        cls.proc = subprocess.Popen(
+            [
+                sys.executable, str(SERVER_SCRIPT),
+                str(cls.tmpdir), str(cls.port), cls.peer_id,
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        if not wait_for_server(cls.port):
+            cls.proc.kill()
+            raise RuntimeError("Server failed to start")
+
+    @classmethod
+    def tearDownClass(cls):
+        kill_server(cls.tmpdir, cls.port)
+        cls.proc.kill()
+        cls.proc.wait()
+
+    def test_send_water_message_via_script(self):
+        """send_message.py sends water message with --type and --topic."""
+        result = subprocess.run(
+            [
+                sys.executable, str(SEND_MESSAGE_SCRIPT),
+                f"localhost:{self.port}", "test_sender", "Let's talk climbing!",
+                "--type", "water", "--topic", "climbing",
+            ],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, f"Failed: {result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["status"], "received")
+
+        # Verify saved with type and topic
+        msg_file = self.tmpdir / "messages" / "test_sender.jsonl"
+        self.assertTrue(msg_file.exists())
+        lines = msg_file.read_text().strip().split("\n")
+        last_msg = json.loads(lines[-1])
+        self.assertEqual(last_msg["type"], "water")
+        self.assertEqual(last_msg["topic"], "climbing")
 
 
 if __name__ == "__main__":
