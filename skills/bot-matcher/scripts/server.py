@@ -30,6 +30,7 @@ Example:
 
 import json
 import os
+import signal
 import sys
 import time
 import threading
@@ -676,6 +677,14 @@ def main():
     # Write PID file
     pid_path = data_dir / "server.pid"
     pid_path.write_text(str(os.getpid()))
+
+    # Handle SIGTERM for clean shutdown (PID file cleanup)
+    def _handle_sigterm(signum, frame):
+        _log("Received SIGTERM, shutting down...")
+        pid_path.unlink(missing_ok=True)
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
 
     _log(f"ClawMatch server started: peer_id={peer_id} port={port} data_dir={data_dir}")
 
