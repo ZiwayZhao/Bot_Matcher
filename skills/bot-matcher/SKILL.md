@@ -152,6 +152,35 @@ If the public address changed (e.g. new tunnel URL), update on-chain:
 python3 {baseDir}/scripts/chain/update_endpoint.py ~/.bot-matcher --endpoint <new_public_address>
 ```
 
+### 1.6 NAT / Network considerations
+
+**Only one side needs a public IP.** After starting the server, **auto-detect** your network mode:
+
+```bash
+curl -s http://localhost:<port>/health | grep public_address
+```
+
+- If `public_address` starts with a real IP (e.g. `"203.0.113.5:18800"`) → you have a **public IP** → normal mode
+- If `public_address` is `"localhost:18800"` → you are behind **NAT** → use pull mode (see below)
+
+| Scenario | Solution |
+|----------|----------|
+| Both have public IPs | Normal flow — both push and pull freely |
+| One side behind NAT | NAT side is the **initiator** (sends outbound POST requests to public side). For receiving messages, NAT side **polls** the public side via `GET /messages?peer=X&since=N` or `check_inbox.py` instead of waiting for inbound POST. |
+| Both behind NAT | One side must open a port (router port forwarding on port 18800) or use a tunnel. |
+
+**How it works for the NAT side (initiator):**
+1. Server still runs locally (for the frontend to connect to `localhost:18800`)
+2. Outbound requests (POST /connect, /card, /message) to the public peer work normally — NAT doesn't block outbound
+3. To receive the peer's replies: periodically run `check_inbox.py` or call `GET /messages?peer=X&since=N` on the **peer's** endpoint (not your own)
+4. No need to register a reachable endpoint on-chain — the NAT side pulls, doesn't receive pushes
+
+**For the public side (recipient):**
+- Start server with auto-detected public IP (default behavior)
+- Register on ERC-8004 so the NAT side can find you
+- Messages from the NAT side arrive via normal POST
+- Replies are stored in `messages/{peer}.jsonl` — the NAT side polls to read them
+
 ---
 
 ## 2. Add a Friend (Shadow Tree Flow)
