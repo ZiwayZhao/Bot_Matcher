@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Resolve a claw's service endpoint from the ERC-8004 Identity Registry.
+"""Resolve a claw's identity from the ERC-8004 Identity Registry.
 
 Given an agent ID (on-chain), fetches the registration URI, parses it,
-and returns the service endpoint for ClawMatch P2P connection.
+and returns the wallet address for XMTP communication.
 
 Usage:
   python3 resolve.py <agent_id> [--network sepolia]
@@ -10,7 +10,7 @@ Usage:
 Example:
   python3 resolve.py 42 --network sepolia
 
-Output (stdout): JSON with the resolved endpoint and registration info.
+Output (stdout): JSON with the resolved wallet address and registration info.
 """
 
 import json
@@ -32,8 +32,6 @@ from abi import IDENTITY_REGISTRY_ABI, CONTRACTS, DEFAULT_RPC
 def parse_agent_uri(uri: str) -> dict:
     """Parse an agent URI (data URI or HTTP URL) into registration JSON."""
     if uri.startswith("data:application/json"):
-        # data:application/json;utf8,{...}
-        # or data:application/json;base64,...
         if ";utf8," in uri:
             json_str = uri.split(";utf8,", 1)[1]
         elif ";charset=utf-8," in uri:
@@ -48,7 +46,6 @@ def parse_agent_uri(uri: str) -> dict:
         with urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
     elif uri.startswith("ipfs://"):
-        # Use public IPFS gateway
         cid = uri.replace("ipfs://", "")
         gateway_url = f"https://ipfs.io/ipfs/{cid}"
         req = Request(gateway_url, method="GET")
@@ -62,7 +59,10 @@ def resolve_agent(
     agent_id: int,
     network: str = "sepolia",
 ) -> dict:
-    """Resolve an agent's registration from on-chain data."""
+    """Resolve an agent's registration from on-chain data.
+
+    Returns dict with wallet_address as the primary communication identifier.
+    """
     if network not in CONTRACTS:
         raise ValueError(f"Unknown network: {network}")
 
@@ -86,7 +86,7 @@ def resolve_agent(
     except Exception as e:
         raise ValueError(f"Agent ID {agent_id} not found on {network}: {e}")
 
-    # Get the owner address
+    # Get the owner address — this IS the XMTP communication address
     try:
         owner = contract.functions.ownerOf(agent_id).call()
     except Exception:
@@ -95,27 +95,23 @@ def resolve_agent(
     # Parse the registration URI
     registration = parse_agent_uri(agent_uri)
 
-    # Extract clawmatch service endpoint
-    endpoint = None
+    # Detect communication protocol from registration
+    protocol = "xmtp"  # Default for v2
     services = registration.get("services", [])
     for svc in services:
         if svc.get("name") == "clawmatch":
-            endpoint = svc.get("endpoint")
+            protocol = svc.get("protocol", "xmtp")
             break
-
-    # If no clawmatch-specific service, try the first one
-    if endpoint is None and services:
-        endpoint = services[0].get("endpoint")
 
     return {
         "agent_id": agent_id,
         "name": registration.get("name", "unknown"),
         "description": registration.get("description", ""),
-        "endpoint": endpoint,
+        "wallet_address": owner.lower() if owner else None,
+        "protocol": protocol,
         "active": registration.get("active", True),
-        "owner_address": owner,
         "network": network,
-        "agent_uri": agent_uri[:200],  # Truncate for display
+        "agent_uri": agent_uri[:200],
         "full_registration": registration,
     }
 

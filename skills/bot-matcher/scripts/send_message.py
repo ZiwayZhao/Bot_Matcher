@@ -1,37 +1,32 @@
 #!/usr/bin/env python3
-"""Send a conversation message to a peer.
+"""Send a conversation message to a peer via XMTP.
 
 Usage:
-  python3 send_message.py <peer_address> <sender_id> <message> [--type TYPE] [--topic TOPIC]
+  python3 send_message.py <data_dir> <peer_wallet_address> <message> [--type TYPE] [--topic TOPIC]
 
 Examples:
-  python3 send_message.py localhost:18800 agent_alice "Hey, I saw your profile..."
-  python3 send_message.py localhost:18800 agent_alice "Let's talk about climbing!" --type water --topic climbing
+  python3 send_message.py ~/.bot-matcher 0x1234...abcd "Hey, I saw your profile..."
+  python3 send_message.py ~/.bot-matcher 0x1234...abcd "Let's talk about climbing!" --type water --topic climbing
 
-Output (stdout): JSON with peer's response.
+Output (stdout): JSON with send result.
 """
 
 import json
 import sys
-from urllib.request import Request, urlopen
-from urllib.error import URLError
+from pathlib import Path
 
-
-def make_url(address: str, path: str) -> str:
-    """Build a full URL from an address and path, supporting http/https prefixes."""
-    if address.startswith("http://") or address.startswith("https://"):
-        return f"{address.rstrip('/')}{path}"
-    return f"http://{address}{path}"
+sys.path.insert(0, str(Path(__file__).parent))
+from xmtp_client import send_xmtp, build_clawmatch_message, is_bridge_running
 
 
 def main():
     if len(sys.argv) < 4:
-        print(f"Usage: {sys.argv[0]} <peer_address> <sender_id> <message> [--type TYPE] [--topic TOPIC]")
+        print(f"Usage: {sys.argv[0]} <data_dir> <peer_wallet_address> <message> [--type TYPE] [--topic TOPIC]")
         sys.exit(1)
 
-    peer_address = sys.argv[1]
-    sender_id = sys.argv[2]
-    message = sys.argv[3]
+    data_dir = Path(sys.argv[1]).expanduser()
+    peer_wallet = sys.argv[2]
+    message_text = sys.argv[3]
 
     # Parse optional flags
     msg_type = "conversation"
@@ -48,30 +43,41 @@ def main():
         else:
             i += 1
 
-    body = {
-        "sender_id": sender_id,
-        "content": message,
+    # Check bridge
+    if not is_bridge_running():
+        print(json.dumps({"error": "XMTP bridge is not running. Start it first: python3 start_bridge.py <data_dir>"}))
+        sys.exit(1)
+
+    # Load own peer_id
+    config = {}
+    config_path = data_dir / "config.json"
+    if config_path.exists():
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    own_peer_id = config.get("peer_id", "unknown")
+
+    # Build ClawMatch message
+    payload = {
+        "content": message_text,
         "type": msg_type,
     }
     if topic:
-        body["topic"] = topic
+        payload["topic"] = topic
 
-    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    message = build_clawmatch_message("message", payload, sender_id=own_peer_id)
 
-    url = make_url(peer_address, "/message")
-    req = Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json; charset=utf-8"},
-        method="POST",
-    )
-
+    # Send via XMTP
     try:
-        with urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read())
-            print(json.dumps(result, indent=2, ensure_ascii=False))
-    except URLError as e:
-        print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        result = send_xmtp(peer_wallet, message)
+        print(json.dumps({
+            "status": "sent",
+            "to_wallet": peer_wallet,
+            "own_peer_id": own_peer_id,
+            "type": msg_type,
+            "topic": topic,
+            "send_result": result,
+        }, indent=2, ensure_ascii=False))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
         sys.exit(1)
 
 

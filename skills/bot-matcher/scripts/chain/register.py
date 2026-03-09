@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """Register a claw (AI agent) on the ERC-8004 Identity Registry.
 
-Creates an on-chain identity for this claw, storing a registration file URI
-that contains the claw's name, description, and service endpoint.
+Creates an on-chain identity for this claw. The wallet address used for
+registration also serves as the XMTP communication address — no separate
+endpoint URL is needed.
 
 Usage:
-  python3 register.py <data_dir> --name <claw_name> --endpoint <service_url> [--network sepolia]
+  python3 register.py <data_dir> --name <claw_name> [--network sepolia]
 
 Example:
-  python3 register.py ~/.bot-matcher --name ziway_claw --endpoint https://abc.trycloudflare.com --network sepolia
+  python3 register.py ~/.bot-matcher --name ziway_claw --network sepolia
 
 Prerequisites:
   - pip install web3
   - A wallet with ETH for gas (auto-generated if none exists)
-  - For Sepolia: get test ETH from https://sepoliafaucet.com
+  - For Sepolia: get test ETH from https://cloud.google.com/application/web3/faucet/ethereum/sepolia
 
 Output:
   Writes chain registration info to <data_dir>/chain_identity.json
@@ -37,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from abi import IDENTITY_REGISTRY_ABI, CONTRACTS, DEFAULT_RPC
 
 
-def load_or_create_wallet(data_dir: Path) -> tuple:
+def load_or_create_wallet(data_dir: Path):
     """Load existing wallet or create a new one. Returns (account, is_new)."""
     wallet_path = data_dir / "wallet.json"
     if wallet_path.exists():
@@ -59,13 +60,10 @@ def load_or_create_wallet(data_dir: Path) -> tuple:
     return account, True
 
 
-def build_registration_uri(
-    claw_name: str, endpoint: str, agent_id: int | None = None
-) -> str:
+def build_registration_uri(claw_name: str, agent_id: int = None) -> str:
     """Build a data URI containing the ERC-8004 registration-v1 JSON.
 
-    For production, this should be hosted on IPFS or a web server.
-    For now, we use a data URI to avoid external dependencies.
+    XMTP version: no endpoint URL stored. Communication is via wallet address.
     """
     registration = {
         "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
@@ -74,7 +72,7 @@ def build_registration_uri(
         "services": [
             {
                 "name": "clawmatch",
-                "endpoint": endpoint,
+                "protocol": "xmtp",
                 "version": "2.0.0",
             }
         ],
@@ -85,7 +83,6 @@ def build_registration_uri(
         registration["registrations"] = [
             {"agentId": agent_id, "agentRegistry": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e"}
         ]
-    # Use data URI for self-contained registration
     reg_json = json.dumps(registration, ensure_ascii=False)
     return f"data:application/json;utf8,{reg_json}"
 
@@ -93,7 +90,6 @@ def build_registration_uri(
 def register_on_chain(
     data_dir: Path,
     claw_name: str,
-    endpoint: str,
     network: str = "sepolia",
 ) -> dict:
     """Register claw on ERC-8004 Identity Registry. Returns registration info."""
@@ -115,7 +111,7 @@ def register_on_chain(
     if is_new_wallet:
         print(f"  Created new wallet: {account.address}")
         print(f"  Fund it with ETH on {network} before registering.")
-        print(f"  Sepolia faucet: https://sepoliafaucet.com")
+        print(f"  Get free testnet ETH: https://cloud.google.com/application/web3/faucet/ethereum/sepolia")
 
     # Check balance
     balance = w3.eth.get_balance(account.address)
@@ -126,7 +122,9 @@ def register_on_chain(
     if balance == 0:
         raise ValueError(
             f"Wallet has 0 ETH on {network}. "
-            f"Fund it first: {account.address}"
+            f"Fund it first: {account.address}\n"
+            f"  Get free testnet ETH (~30 seconds): "
+            f"https://cloud.google.com/application/web3/faucet/ethereum/sepolia"
         )
 
     # Build contract instance
@@ -135,14 +133,11 @@ def register_on_chain(
         abi=IDENTITY_REGISTRY_ABI,
     )
 
-    # Build registration URI
-    agent_uri = build_registration_uri(claw_name, endpoint)
+    # Build registration URI (no endpoint — XMTP uses wallet address)
+    agent_uri = build_registration_uri(claw_name)
 
     # Build and send transaction
-    # Use the simple register(string) overload
     nonce = w3.eth.get_transaction_count(account.address)
-
-    # Encode the function call
     tx = contract.functions.register(agent_uri).build_transaction(
         {
             "from": account.address,
@@ -153,13 +148,11 @@ def register_on_chain(
         }
     )
 
-    # Sign and send
     signed_tx = w3.eth.account.sign_transaction(tx, account.key)
     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
     print(f"  Transaction sent: {tx_hash.hex()}")
     print(f"  Waiting for confirmation...")
 
-    # Wait for receipt
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
     if receipt["status"] != 1:
@@ -181,7 +174,7 @@ def register_on_chain(
         "network": network,
         "chain_id": contract_info["chain_id"],
         "contract_address": contract_info["identity_registry"],
-        "endpoint": endpoint,
+        "communication": "xmtp",
         "tx_hash": tx_hash.hex(),
         "registered_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -201,7 +194,6 @@ def main():
     parser = argparse.ArgumentParser(description="Register claw on ERC-8004")
     parser.add_argument("data_dir", help="Bot-matcher data directory (e.g. ~/.bot-matcher)")
     parser.add_argument("--name", required=True, help="Claw name (unique identifier)")
-    parser.add_argument("--endpoint", required=True, help="Service endpoint URL")
     parser.add_argument(
         "--network",
         default="sepolia",
@@ -215,8 +207,9 @@ def main():
 
     print(f"[ERC-8004] Registering claw '{args.name}' on {args.network}...")
     try:
-        result = register_on_chain(data_dir, args.name, args.endpoint, args.network)
+        result = register_on_chain(data_dir, args.name, args.network)
         print(f"\n[Done] Agent ID: {result['agent_id']}")
+        print(f"[Done] Wallet (XMTP address): {result['wallet_address']}")
         print(json.dumps(result, indent=2, ensure_ascii=False))
     except Exception as e:
         print(f"\n[ERROR] Registration failed: {e}", file=sys.stderr)

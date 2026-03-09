@@ -33,7 +33,7 @@ def load_json(path: Path) -> dict:
         return {}
 
 
-def parse_iso(ts: str | None) -> datetime | None:
+def parse_iso(ts=None):
     if not ts:
         return None
     try:
