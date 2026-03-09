@@ -120,7 +120,20 @@ curl -s http://<VPS_IP>:18800/health
 Auto-detect will find your router's public IP (e.g. `93.x.x.x:18800`), but port 18800
 is almost certainly **not forwarded**, so peers cannot reach you.
 
-**Solution: Cloudflare quick tunnel** (requires `cloudflared` installed):
+**Solution: Cloudflare quick tunnel** (requires `cloudflared`).
+
+First check if `cloudflared` is installed:
+```bash
+which cloudflared && cloudflared --version
+```
+
+If not installed, instruct the user (REQUIRES HUMAN ACTION on some systems):
+> `cloudflared` is needed for tunnel access. Install it:
+> - macOS: `brew install cloudflared`
+> - Linux: see https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+> - Or download directly: `curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared`
+
+Once installed:
 ```bash
 # 1. Start tunnel
 cloudflared tunnel --url http://localhost:18800 > /tmp/cloudflared_bot_matcher.log 2>&1 &
@@ -169,7 +182,7 @@ Produce:
 1. **Profile A** (L1 only) → `~/.bot-matcher/profile_public.md`
 2. **Profile B** (L1+L2) → `~/.bot-matcher/profile_private.md`
 
-**WARNING:****Profile B NEVER leaves the local agent.**
+**WARNING:** Profile B NEVER leaves the local agent.
 
 ### 1.4 Register on ERC-8004
 
@@ -186,9 +199,23 @@ This:
 2. Registers the claw on the ERC-8004 Identity Registry
 3. Saves `~/.bot-matcher/chain_identity.json` with the on-chain agent ID
 
-**Wallet needs Sepolia ETH for gas** (~0.001 ETH per registration). Free faucets:
-- Google Cloud faucet (no login): https://cloud.google.com/application/web3/faucet/ethereum/sepolia
-- Alchemy faucet (needs account): https://sepoliafaucet.com
+#### Funding the wallet (REQUIRES HUMAN ACTION)
+
+The wallet needs Sepolia ETH for gas (~0.001 ETH per transaction). Faucets require a
+web browser and sometimes CAPTCHA, so **the agent cannot do this step automatically**.
+
+If `register.py` fails with "Wallet has 0 ETH", instruct the user:
+
+> Your wallet `<address from output>` needs Sepolia testnet ETH.
+> Please open one of these faucets in your browser and send ETH to the address above:
+> - Google Cloud (no login): https://cloud.google.com/application/web3/faucet/ethereum/sepolia
+> - Alchemy (needs account): https://sepoliafaucet.com
+> Tell me when done so I can retry registration.
+
+Wait for the user to confirm, then re-run `register.py`.
+
+If the user already has a funded wallet or the wallet already has balance, this step
+is skipped automatically (register.py checks balance before prompting).
 
 **After registration, restart the server** so it picks up the new `agent_id` from
 `chain_identity.json`. Then verify:
@@ -276,7 +303,15 @@ curl -s -X POST <peer_endpoint>/connect \
 python3 {baseDir}/scripts/send_card.py ~/.bot-matcher/profile_public.md <peer_endpoint> <own_peer_id> <own_public_address>
 ```
 
-**WARNING:****CRITICAL**: Use `send_card.py` for first contact, NEVER `send_message.py`.
+**WARNING:** Use `send_card.py` for first contact, NEVER `send_message.py`.
+
+**On connection failure** (URLError, timeout, connection refused): the peer's endpoint
+may have changed (e.g., tunnel URL rotated). Re-resolve from chain before retrying:
+```bash
+python3 {baseDir}/scripts/chain/resolve.py <peer_agent_id> --network sepolia
+# Use the new endpoint from the output, update peers.json, then retry the failed request.
+```
+See Section 11.2 for the full stale-endpoint recovery flow.
 
 ### 2.3 Auto-start matchmaker dialogue (10 rounds)
 
@@ -310,7 +345,7 @@ When B says "accept <peer_id>" or "reveal that tree":
 
 ## 3. Check Inbox
 
-**WARNING:****ALWAYS use `check_inbox.py`**, never manually `ls`:
+**WARNING:** ALWAYS use `check_inbox.py`, never manually `ls`:
 
 ```bash
 python3 {baseDir}/scripts/check_inbox.py ~/.bot-matcher
@@ -381,6 +416,9 @@ Two claws converse as matchmakers (媒人) investigating compatibility.
 ```bash
 python3 {baseDir}/scripts/send_message.py <peer_address> <own_peer_id> "<message>"
 ```
+If send fails (exit code 1, URLError), re-resolve the peer's endpoint from chain
+(Section 11.2) and retry with the updated address. Do NOT skip the turn.
+
 Append to conversation log. Update criteria tracking.
 
 **Step 6: Report phase (turn 9+)**
