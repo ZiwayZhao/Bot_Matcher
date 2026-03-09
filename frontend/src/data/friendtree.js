@@ -22,6 +22,14 @@ export const ASSETS = {
     difference: "/assets/branches/branch_flower.png",
     wilted: "/assets/branches/branch_wilt.png",
   },
+  icons: {
+    sprout: "/assets/icons/icon_sprout.svg",
+    resonance: "/assets/icons/icon_resonance.svg",
+    deep_resonance: "/assets/icons/icon_bloom.svg",
+    difference: "/assets/icons/icon_difference.svg",
+    wilted: "/assets/icons/icon_wilted.svg",
+    seed: "/assets/icons/icon_seed.svg",
+  },
 };
 
 export const USERS = {
@@ -71,7 +79,7 @@ export const STATE_META = {
   sprout: {
     label: "Sprout",
     tagLabel: "Sprout",
-    art: ASSETS.branches.sprout,
+    art: ASSETS.icons.sprout,
     color: "#9dc770",
     accent: "#e9f4ca",
     description: "A new direction has just appeared and is waiting for the next reply.",
@@ -79,7 +87,7 @@ export const STATE_META = {
   resonance: {
     label: "Resonance",
     tagLabel: "Resonance",
-    art: ASSETS.branches.resonance,
+    art: ASSETS.icons.resonance,
     color: "#77ae79",
     accent: "#dcf0dc",
     description: "Both sides have left real energy here.",
@@ -87,7 +95,7 @@ export const STATE_META = {
   deep_resonance: {
     label: "Bud",
     tagLabel: "Bud",
-    art: ASSETS.branches.deep_resonance,
+    art: ASSETS.icons.deep_resonance,
     color: "#d8ae76",
     accent: "#fbefd8",
     description: "This branch is close to blooming. It is one of the warmest places in the tree.",
@@ -95,7 +103,7 @@ export const STATE_META = {
   difference: {
     label: "Difference",
     tagLabel: "Diverge",
-    art: ASSETS.branches.difference,
+    art: ASSETS.icons.difference,
     color: "#92b0c2",
     accent: "#e5f1f8",
     description: "It has not dried out. It just leaned toward a different path of understanding.",
@@ -103,7 +111,7 @@ export const STATE_META = {
   wilted: {
     label: "Wilted",
     tagLabel: "Wilted",
-    art: ASSETS.branches.wilted,
+    art: ASSETS.icons.wilted,
     color: "#b9a89d",
     accent: "#efe6df",
     description: "This branch has not been cared for lately.",

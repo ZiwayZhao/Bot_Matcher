@@ -152,13 +152,13 @@ export function shadowConnectionToTree(connection) {
  */
 export function formatNotification(notification) {
   const iconArts = {
-    wilt_warning: "/assets/branches/branch_wilt.png",
-    new_tree: "/assets/branches/branch_sprout.png",
-    shadow_tree: "/assets/branches/branch_sprout.png",
-    resonance_opportunity: "/assets/branches/branch_bloom.png",
+    wilt_warning: "/assets/icons/icon_wilted.svg",
+    new_tree: "/assets/icons/icon_sprout.svg",
+    shadow_tree: "/assets/icons/icon_seed.svg",
+    resonance_opportunity: "/assets/icons/icon_bloom.svg",
   };
   return {
     ...notification,
-    iconArt: iconArts[notification.type] || "/assets/branches/branch_sprout.png",
+    iconArt: iconArts[notification.type] || "/assets/icons/icon_sprout.svg",
   };
 }

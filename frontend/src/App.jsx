@@ -269,10 +269,10 @@ export default function App() {
                 {activeTree.matchScore ? <span style={{ fontSize: "0.85rem" }}>Score: {activeTree.matchScore}/10</span> : null}
               </div>
               <div className="brand-card__counts">
-                {activeStats.sprout > 0 && <span><img className="state-icon" src={ASSETS.branches.sprout} alt="" /> {activeStats.sprout}</span>}
-                {activeStats.resonance > 0 && <span><img className="state-icon" src={ASSETS.branches.resonance} alt="" /> {activeStats.resonance}</span>}
-                {activeStats.deep_resonance > 0 && <span><img className="state-icon" src={ASSETS.branches.deep_resonance} alt="" /> {activeStats.deep_resonance}</span>}
-                {activeStats.wilted > 0 && <span><img className="state-icon" src={ASSETS.branches.wilted} alt="" /> {activeStats.wilted}</span>}
+                {activeStats.sprout > 0 && <span><img className="state-icon" src={ASSETS.icons.sprout} alt="" /> {activeStats.sprout}</span>}
+                {activeStats.resonance > 0 && <span><img className="state-icon" src={ASSETS.icons.resonance} alt="" /> {activeStats.resonance}</span>}
+                {activeStats.deep_resonance > 0 && <span><img className="state-icon" src={ASSETS.icons.deep_resonance} alt="" /> {activeStats.deep_resonance}</span>}
+                {activeStats.wilted > 0 && <span><img className="state-icon" src={ASSETS.icons.wilted} alt="" /> {activeStats.wilted}</span>}
               </div>
               <div className="brand-card__status"><strong>{statusText}</strong></div>
               {activeTree.isShadow ? (

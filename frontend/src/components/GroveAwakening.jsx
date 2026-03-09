@@ -65,7 +65,6 @@ export function GroveAwakening({ stage, lobsterMotions, easterEgg, onLobsterClic
             type="button"
           >
             <span className="ritual-spot__glow" />
-            <img className="ritual-spot__seed" src={ASSETS.branches.sprout} alt="" />
           </button>
         )}
 
@@ -73,7 +72,7 @@ export function GroveAwakening({ stage, lobsterMotions, easterEgg, onLobsterClic
         {showRitualInput && (
           <div className="ritual-card">
             <div className="ritual-card__inner">
-              <img className="ritual-card__seed" src={ASSETS.branches.sprout} alt="" />
+              <img className="ritual-card__seed" src={ASSETS.icons.seed} alt="" />
               <input
                 className="ritual-card__input"
                 value={url}
@@ -89,7 +88,7 @@ export function GroveAwakening({ stage, lobsterMotions, easterEgg, onLobsterClic
                 type="button"
                 aria-label="Plant seed"
               >
-                <img className="ritual-card__submit-art" src={ASSETS.branches.resonance} alt="" />
+                <img className="ritual-card__submit-art" src={ASSETS.icons.sprout} alt="" />
               </button>
             </div>
             {status && <p className="ritual-card__status">{status}</p>}

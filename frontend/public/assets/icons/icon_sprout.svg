@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Soft green sprout bud -->
+  <g opacity="0.95">
+    <!-- Stem -->
+    <path d="M32 48 C32 42, 30 36, 32 30" stroke="#7a9e6a" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <!-- Left leaf bud -->
+    <path d="M32 34 C28 30, 22 28, 20 24 C24 24, 28 26, 32 30" fill="#9dc770" stroke="#7a9e6a" stroke-width="1.5" stroke-linejoin="round"/>
+    <!-- Right leaf bud -->
+    <path d="M32 30 C36 26, 40 22, 44 20 C42 24, 38 28, 32 30" fill="#b5d98a" stroke="#7a9e6a" stroke-width="1.5" stroke-linejoin="round"/>
+    <!-- Top tiny leaf -->
+    <path d="M32 30 C30 24, 30 20, 32 16 C34 20, 34 24, 32 30" fill="#c8e6a0" stroke="#7a9e6a" stroke-width="1.2" stroke-linejoin="round"/>
+    <!-- Leaf veins -->
+    <path d="M32 28 C30 26, 26 25, 24 24" stroke="#7a9e6a" stroke-width="0.8" stroke-linecap="round" fill="none" opacity="0.5"/>
+    <path d="M32 28 C35 25, 38 23, 40 22" stroke="#7a9e6a" stroke-width="0.8" stroke-linecap="round" fill="none" opacity="0.5"/>
+    <!-- Ground dot -->
+    <ellipse cx="32" cy="49" rx="6" ry="2" fill="#c4b08a" opacity="0.4"/>
+  </g>
+</svg>

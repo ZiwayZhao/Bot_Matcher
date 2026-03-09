@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Blooming flower — deep resonance -->
+  <g opacity="0.95">
+    <!-- Stem -->
+    <path d="M32 48 C32 44, 31 40, 32 34" stroke="#8a7a5a" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+    <!-- Small leaves on stem -->
+    <path d="M32 42 C28 40, 26 38, 26 36 C28 37, 30 39, 32 40" fill="#9dc770" stroke="#7a9e6a" stroke-width="1" stroke-linejoin="round"/>
+    <path d="M32 40 C36 38, 38 36, 40 34 C38 36, 36 38, 32 39" fill="#b5d98a" stroke="#7a9e6a" stroke-width="1" stroke-linejoin="round"/>
+    <!-- Flower petals -->
+    <path d="M32 28 C28 24, 24 22, 24 18 C28 18, 30 22, 32 26" fill="#f5d6c8" stroke="#d4a088" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M32 28 C36 24, 40 22, 42 18 C38 18, 34 22, 32 26" fill="#f0c8b8" stroke="#d4a088" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M32 28 C28 26, 22 26, 20 24 C24 22, 28 24, 32 26" fill="#fbe8d8" stroke="#d4a088" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M32 28 C36 26, 42 26, 44 24 C40 22, 36 24, 32 26" fill="#f8ddd0" stroke="#d4a088" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M32 28 C30 24, 30 18, 32 14 C34 18, 34 24, 32 28" fill="#fce8dc" stroke="#d4a088" stroke-width="1.2" stroke-linejoin="round"/>
+    <!-- Flower center -->
+    <circle cx="32" cy="26" r="4" fill="#f0d88a" stroke="#d4a864" stroke-width="1"/>
+    <circle cx="31" cy="25" r="1.5" fill="#fff8e0" opacity="0.7"/>
+    <!-- Ground -->
+    <ellipse cx="32" cy="49" rx="6" ry="2" fill="#c4b08a" opacity="0.4"/>
+  </g>
+</svg>

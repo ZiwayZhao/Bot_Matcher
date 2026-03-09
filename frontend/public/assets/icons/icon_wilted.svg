@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Drooping leaf — wilted -->
+  <g opacity="0.90">
+    <!-- Stem, slightly bent -->
+    <path d="M30 48 C30 44, 31 40, 32 34 C33 30, 32 28, 30 26" stroke="#9a8068" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+    <!-- Drooping leaf -->
+    <path d="M30 26 C26 28, 22 32, 20 38 C24 36, 28 32, 30 28" fill="#c8b8a0" stroke="#9a8068" stroke-width="1.5" stroke-linejoin="round"/>
+    <!-- Leaf vein -->
+    <path d="M28 28 C26 30, 24 33, 22 35" stroke="#9a8068" stroke-width="0.8" fill="none" opacity="0.5"/>
+    <!-- Small dried bud on top -->
+    <path d="M30 26 C28 22, 30 18, 34 18 C34 22, 32 24, 30 26" fill="#d4c4a8" stroke="#9a8068" stroke-width="1.2" stroke-linejoin="round"/>
+    <!-- Falling petal -->
+    <path d="M38 34 C40 36, 42 40, 40 42 C38 40, 38 36, 38 34" fill="#d8c8b0" stroke="#b0a088" stroke-width="0.8" opacity="0.6"/>
+    <!-- Ground -->
+    <ellipse cx="32" cy="49" rx="6" ry="2" fill="#c4b08a" opacity="0.4"/>
+  </g>
+</svg>

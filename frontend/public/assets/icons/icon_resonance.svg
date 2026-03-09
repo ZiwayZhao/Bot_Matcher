@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Two leaves touching — resonance/connection -->
+  <g opacity="0.95">
+    <!-- Left leaf -->
+    <path d="M18 38 C20 30, 24 24, 30 20 C28 26, 26 32, 28 36" fill="#8cc47a" stroke="#5e8a52" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M24 29 C22 32, 22 35, 24 36" stroke="#5e8a52" stroke-width="0.8" fill="none" opacity="0.5"/>
+    <!-- Right leaf -->
+    <path d="M46 38 C44 30, 40 24, 34 20 C36 26, 38 32, 36 36" fill="#77ae79" stroke="#5e8a52" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M40 29 C42 32, 42 35, 40 36" stroke="#5e8a52" stroke-width="0.8" fill="none" opacity="0.5"/>
+    <!-- Shared stem -->
+    <path d="M28 36 C30 40, 31 44, 32 48" stroke="#6b8f5c" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+    <path d="M36 36 C34 40, 33 44, 32 48" stroke="#6b8f5c" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+    <!-- Connection glow -->
+    <circle cx="32" cy="28" r="4" fill="#dcf0dc" opacity="0.6"/>
+    <circle cx="32" cy="28" r="2" fill="#fff" opacity="0.4"/>
+    <!-- Ground -->
+    <ellipse cx="32" cy="49" rx="6" ry="2" fill="#c4b08a" opacity="0.4"/>
+  </g>
+</svg>

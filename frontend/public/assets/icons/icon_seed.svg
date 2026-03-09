@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Glowing seed — for ritual spot -->
+  <g opacity="0.95">
+    <!-- Outer glow -->
+    <circle cx="32" cy="32" r="20" fill="url(#seedGlow)" opacity="0.3"/>
+    <!-- Seed body -->
+    <path d="M32 42 C26 40, 22 36, 22 30 C22 24, 26 20, 32 18 C38 20, 42 24, 42 30 C42 36, 38 40, 32 42Z" fill="#d8c098" stroke="#b09870" stroke-width="1.5"/>
+    <!-- Seed highlight -->
+    <path d="M32 38 C28 36, 26 33, 26 30 C26 26, 28 23, 32 22" fill="none" stroke="#e8d8c0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    <!-- Tiny sprout emerging from top -->
+    <path d="M32 18 C30 14, 30 12, 32 10" stroke="#9dc770" stroke-width="2" stroke-linecap="round" fill="none"/>
+    <path d="M32 12 C30 10, 28 10, 28 8 C30 8, 32 10, 32 12" fill="#b5d98a" stroke="#7a9e6a" stroke-width="0.8"/>
+    <path d="M32 10 C34 8, 36 8, 36 6 C34 6, 32 8, 32 10" fill="#c8e6a0" stroke="#7a9e6a" stroke-width="0.8"/>
+    <defs>
+      <radialGradient id="seedGlow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#f0d88a" stop-opacity="1"/>
+        <stop offset="100%" stop-color="#f0d88a" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+  </g>
+</svg>
