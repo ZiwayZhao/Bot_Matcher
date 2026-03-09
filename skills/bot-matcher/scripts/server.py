@@ -1,36 +1,27 @@
 #!/usr/bin/env python3
-"""Bot-Matcher HTTP server with gossip peer discovery.
+"""ClawMatch P2P HTTP server (v2).
+
+Replaces gossip-based discovery with ERC-8004 on-chain identity resolution.
+Adds connection request handling for the shadow tree mechanism.
 
 Python stdlib only, zero external dependencies.
 
 Endpoints:
-  GET  /id                       - Return this bot's peer_id
+  GET  /id                       - Return this claw's peer_id + agent_id
   GET  /health                   - Health check with uptime + peer count
   GET  /peers                    - List all known peers
-  POST /exchange                 - Gossip: exchange peer lists
   POST /card                     - Receive a Profile A (MD), return own Profile A
   POST /message                  - Receive a conversation message
   GET  /messages?peer=X&since=N  - Fetch messages from a peer since line N
+  POST /connect                  - Receive a connection request (triggers shadow tree)
+  GET  /connections              - List pending/active connection requests
 
 Usage:
-  python3 server.py <data_dir> <port> <peer_id> [--public-address ADDR] [bootstrap_peers...]
-
-  --public-address: the address other peers should use to reach this server
-                    (e.g. your-domain.com:18800 or 1.2.3.4:18800)
-                    Defaults to localhost:<port> if not set.
-  bootstrap_peers:  space-separated host:port addresses of known peers
+  python3 server.py <data_dir> <port> <peer_id> [--public-address ADDR]
 
 Example:
   python3 server.py ~/.bot-matcher 18800 alice
-  python3 server.py ~/.bot-matcher 18801 bob localhost:18800
-  python3 server.py ~/.bot-matcher 18800 alice --public-address myhost.com:18800 peer1.com:18800
-
-Storage layout under <data_dir>:
-  inbox/{peer_id}.md             - received Profile A from peers
-  messages/{peer_id}.jsonl       - received conversation messages
-  profile_public.md              - own Profile A (read-only, created by agent)
-  peers.json                     - known peers registry (auto-managed)
-  server.pid                     - PID file for management
+  python3 server.py ~/.bot-matcher 18800 alice --public-address https://abc.trycloudflare.com
 """
 
 import json
@@ -43,7 +34,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
-from urllib.error import URLError
 
 
 # ---------------------------------------------------------------------------
@@ -65,22 +55,22 @@ def make_url(address: str, path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Peer Manager
+# Peer Manager (simplified, no gossip)
 # ---------------------------------------------------------------------------
 
 class PeerManager:
-    """Thread-safe registry of known peers."""
+    """Thread-safe registry of known peers. Peers are added via direct
+    connection (ERC-8004 lookup + card exchange), not gossip."""
 
     def __init__(self, own_id: str, own_address: str, data_dir: Path):
         self.own_id = own_id
         self.own_address = own_address
         self.data_dir = data_dir
         self._lock = threading.Lock()
-        self._peers: dict[str, dict] = {}  # peer_id -> {address, last_seen, online}
+        self._peers: dict[str, dict] = {}
         self._load()
 
     def _load(self):
-        """Load persisted peers from disk."""
         path = self.data_dir / "peers.json"
         if path.exists():
             try:
@@ -90,78 +80,132 @@ class PeerManager:
                         self._peers[pid] = {
                             "address": info.get("address", ""),
                             "last_seen": info.get("last_seen", 0),
-                            "online": False,  # will be confirmed by gossip
                         }
             except (json.JSONDecodeError, KeyError):
                 pass
 
     def _save(self):
-        """Persist peers to disk."""
         path = self.data_dir / "peers.json"
-        data = {}
         with self._lock:
-            for pid, info in self._peers.items():
-                data[pid] = {
-                    "address": info["address"],
-                    "last_seen": info["last_seen"],
-                }
+            data = {
+                pid: {"address": info["address"], "last_seen": info["last_seen"]}
+                for pid, info in self._peers.items()
+            }
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def add_peer(self, peer_id: str, address: str) -> bool:
-        """Add or update a peer. Returns True if this is a NEW peer."""
+        """Add or update a peer. Returns True if NEW."""
         if peer_id == self.own_id:
             return False
         is_new = False
         with self._lock:
             if peer_id not in self._peers:
                 is_new = True
-                _log(f"Discovered new peer: {peer_id} at {address}")
+                _log(f"New peer: {peer_id} at {address}")
             self._peers[peer_id] = {
                 "address": address,
                 "last_seen": time.time(),
-                "online": True,
             }
         self._save()
         return is_new
 
-    def mark_offline(self, peer_id: str):
+    def get_peer(self, peer_id: str) -> dict | None:
         with self._lock:
-            if peer_id in self._peers:
-                self._peers[peer_id]["online"] = False
-
-    def get_online_peers(self) -> dict[str, str]:
-        """Return {peer_id: address} for all online peers."""
-        with self._lock:
-            return {
-                pid: info["address"]
-                for pid, info in self._peers.items()
-                if info["online"]
-            }
+            return self._peers.get(peer_id)
 
     def get_all_peers(self) -> dict[str, dict]:
-        """Return all peers with status."""
         with self._lock:
-            return {
-                pid: {
-                    "address": info["address"],
-                    "online": info["online"],
-                    "last_seen": info["last_seen"],
-                }
-                for pid, info in self._peers.items()
-            }
-
-    def get_peers_for_exchange(self, exclude: str = "") -> dict[str, str]:
-        """Return {peer_id: address} for gossip exchange, excluding a target peer."""
-        result = {self.own_id: self.own_address}
-        with self._lock:
-            for pid, info in self._peers.items():
-                if pid != exclude:
-                    result[pid] = info["address"]
-        return result
+            return {pid: dict(info) for pid, info in self._peers.items()}
 
 
 # ---------------------------------------------------------------------------
-# Gossip Loop
+# Connection Request Manager
+# ---------------------------------------------------------------------------
+
+class ConnectionManager:
+    """Manages incoming connection requests and their shadow tree state."""
+
+    def __init__(self, data_dir: Path):
+        self.data_dir = data_dir
+        self._lock = threading.Lock()
+        self._connections: dict[str, dict] = {}
+        self._load()
+
+    def _path(self) -> Path:
+        return self.data_dir / "connections.json"
+
+    def _load(self):
+        if self._path().exists():
+            try:
+                self._connections = json.loads(
+                    self._path().read_text(encoding="utf-8")
+                )
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+    def _save(self):
+        with self._lock:
+            data = dict(self._connections)
+        self._path().write_text(
+            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def add_request(self, from_peer: str, from_address: str, agent_id: int | None = None) -> dict:
+        """Record an incoming connection request. Returns the connection record."""
+        with self._lock:
+            if from_peer in self._connections:
+                # Already exists, update address
+                self._connections[from_peer]["address"] = from_address
+                self._connections[from_peer]["updated_at"] = datetime.now(timezone.utc).isoformat()
+                record = self._connections[from_peer]
+            else:
+                record = {
+                    "from_peer": from_peer,
+                    "address": from_address,
+                    "agent_id": agent_id,
+                    "status": "pending",  # pending | accepted | rejected
+                    "visibility": "shadow",  # shadow | revealed
+                    "received_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                self._connections[from_peer] = record
+        self._save()
+        return record
+
+    def accept(self, peer_id: str) -> dict | None:
+        with self._lock:
+            if peer_id not in self._connections:
+                return None
+            self._connections[peer_id]["status"] = "accepted"
+            self._connections[peer_id]["visibility"] = "revealed"
+            self._connections[peer_id]["accepted_at"] = datetime.now(timezone.utc).isoformat()
+            self._connections[peer_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            record = self._connections[peer_id]
+        self._save()
+        return record
+
+    def reject(self, peer_id: str) -> dict | None:
+        with self._lock:
+            if peer_id not in self._connections:
+                return None
+            self._connections[peer_id]["status"] = "rejected"
+            self._connections[peer_id]["visibility"] = "rejected"
+            self._connections[peer_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            record = self._connections[peer_id]
+        self._save()
+        return record
+
+    def get_all(self) -> dict[str, dict]:
+        with self._lock:
+            return dict(self._connections)
+
+    def get_pending(self) -> list[dict]:
+        with self._lock:
+            return [c for c in self._connections.values() if c["status"] == "pending"]
+
+
+# ---------------------------------------------------------------------------
+# Logging
 # ---------------------------------------------------------------------------
 
 def _log(msg: str):
@@ -170,79 +214,48 @@ def _log(msg: str):
     sys.stdout.flush()
 
 
-def gossip_loop(peer_manager: PeerManager, interval: int = 30):
-    """Periodically exchange peer lists with all known online peers."""
-    while True:
-        time.sleep(interval)
-        online = peer_manager.get_online_peers()
-        if not online:
-            continue
-
-        for peer_id, address in online.items():
-            try:
-                our_peers = peer_manager.get_peers_for_exchange(exclude=peer_id)
-                payload = json.dumps({"peers": our_peers}).encode("utf-8")
-                req = Request(
-                    make_url(address, "/exchange"),
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urlopen(req, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = json.loads(resp.read())
-                        for rid, raddr in data.get("peers", {}).items():
-                            peer_manager.add_peer(rid, raddr)
-            except Exception:
-                peer_manager.mark_offline(peer_id)
-
-
-def bootstrap_peers(peer_manager: PeerManager, addresses: list[str]):
-    """Connect to bootstrap peers: discover their IDs, add them."""
-    for addr in addresses:
-        try:
-            req = Request(make_url(addr, "/id"), method="GET")
-            with urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read())
-                pid = data.get("peer_id")
-                if pid:
-                    peer_manager.add_peer(pid, addr)
-                    _log(f"Bootstrap: connected to {pid} at {addr}")
-        except Exception as e:
-            _log(f"Bootstrap: failed to reach {addr} ({e})")
-
-
 # ---------------------------------------------------------------------------
 # HTTP Handler
 # ---------------------------------------------------------------------------
 
-class BotMatcherHandler(BaseHTTPRequestHandler):
-    """Handle all Bot-Matcher HTTP requests."""
+class ClawMatchHandler(BaseHTTPRequestHandler):
+    """Handle all ClawMatch HTTP requests."""
 
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
         if path == "/id":
-            self._json_response(200, {"peer_id": self.server.peer_id})
+            # Include chain agent_id if registered
+            chain_id = self.server.chain_agent_id
+            self._json_response(200, {
+                "peer_id": self.server.peer_id,
+                "agent_id": chain_id,
+            })
 
         elif path == "/health":
             inbox_dir = self.server.data_dir / "inbox"
             inbox_count = len(list(inbox_dir.glob("*.md"))) if inbox_dir.exists() else 0
             all_peers = self.server.peer_manager.get_all_peers()
+            pending = self.server.connection_manager.get_pending()
             self._json_response(200, {
                 "status": "ok",
                 "peer_id": self.server.peer_id,
+                "agent_id": self.server.chain_agent_id,
                 "public_address": self.server.peer_manager.own_address,
                 "uptime": int(time.time() - self.server.start_time),
                 "inbox_count": inbox_count,
                 "peers_total": len(all_peers),
-                "peers_online": sum(1 for p in all_peers.values() if p["online"]),
+                "pending_connections": len(pending),
             })
 
         elif path == "/peers":
             all_peers = self.server.peer_manager.get_all_peers()
             self._json_response(200, {"peers": all_peers})
+
+        elif path == "/connections":
+            connections = self.server.connection_manager.get_all()
+            self._json_response(200, {"connections": connections})
 
         elif path == "/messages":
             params = parse_qs(parsed.query)
@@ -274,25 +287,40 @@ class BotMatcherHandler(BaseHTTPRequestHandler):
             self._handle_card()
         elif path == "/message":
             self._handle_message()
-        elif path == "/exchange":
-            self._handle_exchange()
+        elif path == "/connect":
+            self._handle_connect()
         else:
             self._json_response(404, {"error": "not found"})
 
-    def _handle_exchange(self):
-        """Gossip: receive peer list, merge with ours, return ours."""
+    def _handle_connect(self):
+        """Handle incoming connection request. Creates a shadow tree on this side."""
         try:
             body = self._read_body()
-            remote_peers = body.get("peers", {})
+            peer_id = body.get("peer_id")
+            address = body.get("address")
+            agent_id = body.get("agent_id")
 
-            # Add all remote peers to our registry
-            for pid, addr in remote_peers.items():
-                self.server.peer_manager.add_peer(pid, addr)
+            if not peer_id:
+                self._json_response(400, {"error": "missing peer_id"})
+                return
 
-            # Return our peers (excluding the sender if we can identify them)
-            # We return all since we don't know the sender's ID from the request
-            our_peers = self.server.peer_manager.get_peers_for_exchange()
-            self._json_response(200, {"peers": our_peers})
+            # Record connection request
+            record = self.server.connection_manager.add_request(
+                peer_id, address or "", agent_id
+            )
+
+            # Register as peer if address provided
+            if address:
+                self.server.peer_manager.add_peer(peer_id, address)
+
+            _log(f"Connection request from {peer_id} (agent #{agent_id})")
+
+            self._json_response(200, {
+                "status": "connection_request_received",
+                "peer_id": self.server.peer_id,
+                "agent_id": self.server.chain_agent_id,
+                "connection_status": record["status"],
+            })
         except (json.JSONDecodeError, ValueError) as e:
             self._json_response(400, {"error": str(e)})
 
@@ -302,7 +330,7 @@ class BotMatcherHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             peer_id = body.get("peer_id")
             profile = body.get("profile")
-            sender_address = body.get("address")  # optional: for auto-discovery
+            sender_address = body.get("address")
             if not peer_id:
                 self._json_response(400, {"error": "missing peer_id"})
                 return
@@ -310,17 +338,14 @@ class BotMatcherHandler(BaseHTTPRequestHandler):
                 self._json_response(400, {"error": "missing profile (markdown content)"})
                 return
 
-            # Auto-discover sender if address provided
             if sender_address:
                 self.server.peer_manager.add_peer(peer_id, sender_address)
 
-            # Save to inbox as .md
             inbox_dir = self.server.data_dir / "inbox"
             inbox_dir.mkdir(parents=True, exist_ok=True)
             card_path = inbox_dir / f"{peer_id}.md"
             card_path.write_text(profile, encoding="utf-8")
 
-            # Return own Profile A if available
             own_profile_path = self.server.data_dir / "profile_public.md"
             own_card = None
             if own_profile_path.exists():
@@ -342,6 +367,8 @@ class BotMatcherHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             sender_id = body.get("sender_id")
             content = body.get("content")
+            msg_type = body.get("type", "conversation")  # conversation | water
+            topic = body.get("topic")  # for watering messages
             if not sender_id or content is None:
                 self._json_response(400, {"error": "missing sender_id or content"})
                 return
@@ -353,8 +380,11 @@ class BotMatcherHandler(BaseHTTPRequestHandler):
             entry = {
                 "role": sender_id,
                 "content": content,
+                "type": msg_type,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+            if topic:
+                entry["topic"] = topic
             with open(msg_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
@@ -399,19 +429,17 @@ def _detect_public_ip() -> str | None:
 
 def main():
     if len(sys.argv) < 4:
-        print(f"Usage: {sys.argv[0]} <data_dir> <port> <peer_id> [--public-address ADDR] [bootstrap_peer ...]")
+        print(f"Usage: {sys.argv[0]} <data_dir> <port> <peer_id> [--public-address ADDR]")
         print(f"  Example: {sys.argv[0]} ~/.bot-matcher 18800 alice")
-        print(f"  Example: {sys.argv[0]} ~/.bot-matcher 18801 bob localhost:18800")
-        print(f"  Example: {sys.argv[0]} ~/.bot-matcher 18800 alice --public-address myhost.com:18800")
+        print(f"  Example: {sys.argv[0]} ~/.bot-matcher 18800 alice --public-address https://abc.trycloudflare.com")
         sys.exit(1)
 
     data_dir = Path(sys.argv[1])
     port = int(sys.argv[2])
     peer_id = sys.argv[3]
 
-    # Parse remaining args: --public-address and bootstrap peers
+    # Parse --public-address
     public_address = None
-    bootstrap_addrs = []
     args = sys.argv[4:]
     i = 0
     while i < len(args):
@@ -419,15 +447,13 @@ def main():
             public_address = args[i + 1]
             i += 2
         else:
-            bootstrap_addrs.append(args[i])
             i += 1
 
-    # Determine own_address for gossip propagation
+    # Determine own address
     if public_address:
         own_address = public_address
         _log(f"Using provided public address: {own_address}")
     else:
-        # Try auto-detect public IP
         detected_ip = _detect_public_ip()
         if detected_ip:
             own_address = f"{detected_ip}:{port}"
@@ -438,41 +464,38 @@ def main():
 
     # Ensure data directories exist
     data_dir.mkdir(parents=True, exist_ok=True)
-    for sub in ("inbox", "messages", "matches", "conversations"):
+    for sub in ("inbox", "messages", "matches", "conversations", "criteria", "handshakes"):
         (data_dir / sub).mkdir(exist_ok=True)
 
-    # Initialize peer manager
-    peer_manager = PeerManager(peer_id, own_address, data_dir)
+    # Load chain identity if registered
+    chain_agent_id = None
+    chain_identity_path = data_dir / "chain_identity.json"
+    if chain_identity_path.exists():
+        try:
+            chain_data = json.loads(chain_identity_path.read_text(encoding="utf-8"))
+            chain_agent_id = chain_data.get("agent_id")
+            _log(f"Chain identity loaded: agent #{chain_agent_id}")
+        except Exception:
+            pass
 
-    # Bootstrap: connect to known peers
-    if bootstrap_addrs:
-        _log(f"Bootstrapping to {len(bootstrap_addrs)} peer(s)...")
-        bootstrap_peers(peer_manager, bootstrap_addrs)
+    # Initialize managers
+    peer_manager = PeerManager(peer_id, own_address, data_dir)
+    connection_manager = ConnectionManager(data_dir)
 
     # Create HTTP server
-    server = HTTPServer(("0.0.0.0", port), BotMatcherHandler)
+    server = HTTPServer(("0.0.0.0", port), ClawMatchHandler)
     server.peer_id = peer_id
     server.data_dir = data_dir
     server.peer_manager = peer_manager
+    server.connection_manager = connection_manager
+    server.chain_agent_id = chain_agent_id
     server.start_time = time.time()
 
     # Write PID file
     pid_path = data_dir / "server.pid"
     pid_path.write_text(str(os.getpid()))
 
-    # Start gossip thread (daemon so it dies with main)
-    gossip_thread = threading.Thread(
-        target=gossip_loop,
-        args=(peer_manager, 30),
-        daemon=True,
-    )
-    gossip_thread.start()
-    _log(f"Gossip thread started (interval=30s)")
-
-    _log(f"Bot-Matcher server started: peer_id={peer_id} port={port} data_dir={data_dir}")
-    if bootstrap_addrs:
-        online = peer_manager.get_online_peers()
-        _log(f"Known peers: {list(online.keys())}")
+    _log(f"ClawMatch server started: peer_id={peer_id} port={port} data_dir={data_dir}")
 
     try:
         server.serve_forever()

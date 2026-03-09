@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check for new profiles, messages, and undiscovered gossip peers.
+"""Check for new profiles, messages, and connection requests.
 
 Usage:
   python3 check_inbox.py <data_dir>
@@ -10,7 +10,7 @@ Example:
 Output (stdout): JSON summary of:
   - new_cards: peers who sent Profile A but haven't been evaluated yet
   - new_messages: peers with unread conversation messages
-  - new_peers: peers discovered via gossip but no card exchanged yet
+  - pending_connections: incoming connection requests awaiting acceptance
 """
 
 import json
@@ -28,15 +28,13 @@ def main():
     matches_dir = data_dir / "matches"
     messages_dir = data_dir / "messages"
     conversations_dir = data_dir / "conversations"
-    peers_file = data_dir / "peers.json"
+    connections_file = data_dir / "connections.json"
 
     # --- 1. New cards (in inbox but no match evaluation yet) ---
     new_cards = []
-    inbox_peer_ids = set()
     if inbox_dir.exists():
         for card_file in sorted(inbox_dir.glob("*.md")):
             peer_id = card_file.stem
-            inbox_peer_ids.add(peer_id)
             match_file = matches_dir / f"{peer_id}.md"
             if not match_file.exists():
                 content = card_file.read_text(encoding="utf-8")
@@ -84,17 +82,18 @@ def main():
                     "latest": latest[-3:],
                 })
 
-    # --- 3. New gossip peers (discovered but no card exchanged yet) ---
-    new_peers = []
-    if peers_file.exists():
+    # --- 3. Pending connection requests (shadow trees awaiting acceptance) ---
+    pending_connections = []
+    if connections_file.exists():
         try:
-            peers_data = json.loads(peers_file.read_text(encoding="utf-8"))
-            for peer_id, info in peers_data.items():
-                # Peer found via gossip but we haven't received their card yet
-                if peer_id not in inbox_peer_ids:
-                    new_peers.append({
+            connections = json.loads(connections_file.read_text(encoding="utf-8"))
+            for peer_id, conn in connections.items():
+                if conn.get("status") == "pending":
+                    pending_connections.append({
                         "peer_id": peer_id,
-                        "address": info.get("address", "unknown"),
+                        "agent_id": conn.get("agent_id"),
+                        "address": conn.get("address"),
+                        "received_at": conn.get("received_at"),
                     })
         except (json.JSONDecodeError, KeyError):
             pass
@@ -104,8 +103,8 @@ def main():
         "new_cards_count": len(new_cards),
         "new_messages": new_messages,
         "new_messages_count": len(new_messages),
-        "new_peers": new_peers,
-        "new_peers_count": len(new_peers),
+        "pending_connections": pending_connections,
+        "pending_connections_count": len(pending_connections),
     }
 
     print(json.dumps(result, indent=2, ensure_ascii=False))

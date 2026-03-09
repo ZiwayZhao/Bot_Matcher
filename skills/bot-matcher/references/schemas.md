@@ -109,14 +109,57 @@ Each line is a JSON object:
 {
   "peer_id": "unique_name",
   "port": 18800,
-  "peers": ["host:port", "host:port"],
   "status": "active",
-  "language": "auto"
+  "language": "auto",
+  "network": "sepolia"
 }
 ```
 
 - `status`: `"active"` | `"paused"` — controls whether agent processes incoming cards/messages
 - `language`: `"auto"` | `"en"` | `"zh"` — which prompt language to use (auto = detect from MEMORY.md)
+- `network`: `"sepolia"` | `"mainnet"` | `"base"` — which Ethereum network for ERC-8004
+
+## 6a. Chain Identity (chain_identity.json)
+
+Created by `chain/register.py` after on-chain registration.
+
+```json
+{
+  "agent_id": 42,
+  "claw_name": "ziway_claw",
+  "wallet_address": "0x...",
+  "network": "sepolia",
+  "chain_id": 11155111,
+  "contract_address": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+  "endpoint": "https://abc.trycloudflare.com",
+  "tx_hash": "0x...",
+  "registered_at": "2026-03-09T...",
+  "last_updated_at": null,
+  "last_update_tx": null
+}
+```
+
+## 6b. Connection Requests (connections.json)
+
+Tracks incoming connection requests and their shadow tree state.
+
+```json
+{
+  "peer_id_a": {
+    "from_peer": "peer_id_a",
+    "address": "https://...",
+    "agent_id": 42,
+    "status": "pending",
+    "visibility": "shadow",
+    "received_at": "2026-03-09T...",
+    "updated_at": "2026-03-09T...",
+    "accepted_at": null
+  }
+}
+```
+
+- `status`: `"pending"` | `"accepted"` | `"rejected"`
+- `visibility`: `"shadow"` | `"revealed"` | `"rejected"`
 
 ## 7. HTTP Transport
 
@@ -242,6 +285,10 @@ Bridge between bot-matcher and the downstream topic-tree game. Generated in two 
   "userBId": "<peer_id>",
   "purpose": "friend",
   "stage": "initial",
+  "visibility": {
+    "sideA": "revealed",
+    "sideB": "shadow"
+  },
   "bootstrap": {
     "mode": "seeded",
     "source": "profile_match",
@@ -290,6 +337,8 @@ Bridge between bot-matcher and the downstream topic-tree game. Generated in two 
 
 | Field | Description |
 |-------|-------------|
+| `visibility.sideA` | `"revealed"` (initiator always sees the full tree) |
+| `visibility.sideB` | `"shadow"` → `"revealed"` on B's acceptance; `"rejected"` on removal |
 | `stage` | `"initial"` = Profile A analysis only; `"enriched"` = includes conversation evidence |
 | `bootstrap.source` | `"profile_match"` for Stage 1; `"conversation"` for Stage 2 |
 | `seedBranches[].state` | `"detected"` → found in Profile A; `"explored"` → discussed in conversation; `"resonance"` → mutual interest confirmed |
@@ -308,3 +357,24 @@ When enriching from initial → enriched:
 2. For existing seeds discussed in conversation: `state` → `"explored"` or `"resonance"`, add chat_message evidence, replace generated dialogueSeed with real excerpts, update confidence to `depth/5`
 3. Add NEW seeds for topics discovered during conversation not in Profile A: set `memoryTierUsed: "t2"`, `state: "explored"` or `"resonance"`
 4. Update `matchSummary.dimensionScores` with final depth values from `criteria/{peer_id}.json`
+
+### Shadow Tree Visibility Rules
+
+The shadow tree mechanism controls what each side sees:
+
+| Side | Initial State | After B Accepts | After B Rejects |
+|------|--------------|----------------|----------------|
+| A (initiator) | `"revealed"` — sees full tree | `"revealed"` | tree marked "unresponded" |
+| B (recipient) | `"shadow"` — sees blurred tree outline | `"revealed"` — tree appears fully grown | `"rejected"` — tree removed |
+
+**The "surprise moment":** When B accepts, the tree doesn't grow from seed — it appears already grown because the claw-to-claw conversation happened in the background while B's tree was in shadow state.
+
+### Watering Updates (Phase 2)
+
+When a user triggers watering on a specific topic:
+1. The watering message is sent with `type: "water"` and `topic: "<topic_name>"`
+2. On response, update the relevant `seedBranch`:
+   - If the topic matches an existing seed: update `state`, `confidence`, and add evidence
+   - If the topic is new: add a new seedBranch with `memoryTierUsed: "t2"`
+3. Watering is independent of the 10-round conversation limit
+4. **Prerequisite**: Both sides must have `visibility: "revealed"` for watering to work
