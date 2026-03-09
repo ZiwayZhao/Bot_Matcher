@@ -148,8 +148,8 @@ def register_on_chain(
             "from": account.address,
             "nonce": nonce,
             "gas": 500_000,
-            "maxFeePerGas": w3.eth.gas_price * 2,
             "maxPriorityFeePerGas": w3.to_wei(1, "gwei"),
+            "maxFeePerGas": max(w3.eth.gas_price * 2, w3.to_wei(2, "gwei")),
         }
     )
 

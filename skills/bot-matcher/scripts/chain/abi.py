@@ -131,6 +131,6 @@ CONTRACTS = {
 # Default RPC endpoints (free, public)
 DEFAULT_RPC = {
     "mainnet": "https://eth.llamarpc.com",
-    "sepolia": "https://rpc.sepolia.org",
+    "sepolia": "https://ethereum-sepolia-rpc.publicnode.com",
     "base": "https://mainnet.base.org",
 }
