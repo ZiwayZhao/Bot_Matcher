@@ -111,9 +111,9 @@ def update_branch_after_water(branch: dict, own_peer_id: str, message: str, resp
     })
     branch["evidence"] = evidence
 
-    # Update confidence based on interaction count
-    water_count = sum(1 for e in evidence if e.get("sourceType") == "water_message")
-    branch["confidence"] = min(1.0, 0.3 + water_count * 0.15)
+    # Increase confidence: bump by 0.1 per watering, never decrease
+    current_confidence = branch.get("confidence", 0.3)
+    branch["confidence"] = min(1.0, current_confidence + 0.1)
 
     # Update dialogue seed with real exchange
     ds = branch.get("dialogueSeed", [])
