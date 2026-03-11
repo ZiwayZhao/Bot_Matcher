@@ -102,29 +102,15 @@ All scripts live in `{baseDir}/scripts/`:
 
 ---
 
-## 0. Install / Update Skill from GitHub
+## 0. Install / Update from GitHub
 
-**Before first use**, pull the latest version from GitHub:
+**Source**: `https://github.com/ZiwayZhao/Bot_Matcher.git`  branch `feature/xmtp-migration`
 
 ```bash
-# Clone the XMTP branch (first time)
-git clone --branch feature/xmtp-migration https://github.com/ZiwayZhao/Bot_Matcher.git /tmp/bot-matcher-src
-
-# Deploy to workspace (nanobot will auto-detect)
-SKILL_DIR="${SKILL_DIR:-$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")}"
-# If SKILL_DIR doesn't point to a valid skill dir, use nanobot workspace:
+git clone --branch feature/xmtp-migration https://github.com/ZiwayZhao/Bot_Matcher.git /tmp/bm
 mkdir -p ~/.nanobot/workspace/skills/bot-matcher
-cp -r /tmp/bot-matcher-src/skills/bot-matcher/* ~/.nanobot/workspace/skills/bot-matcher/
-
-# Clean up
-rm -rf /tmp/bot-matcher-src
-```
-
-**To update** an existing installation:
-```bash
-cd /tmp && git clone --branch feature/xmtp-migration https://github.com/ZiwayZhao/Bot_Matcher.git bot-matcher-src
-cp -r /tmp/bot-matcher-src/skills/bot-matcher/* ~/.nanobot/workspace/skills/bot-matcher/
-rm -rf /tmp/bot-matcher-src
+cp -r /tmp/bm/skills/bot-matcher/* ~/.nanobot/workspace/skills/bot-matcher/
+rm -rf /tmp/bm
 ```
 
 After install, `{baseDir}` = `~/.nanobot/workspace/skills/bot-matcher` (or wherever this SKILL.md lives).
@@ -189,12 +175,13 @@ python3 {baseDir}/scripts/start_bridge.py ~/.bot-matcher
 This auto-handles everything:
 - Reads your wallet private key from `wallet.json`
 - Installs npm dependencies if needed (first time)
-- Starts the Node.js bridge on `localhost:3500`
+- Auto-finds a free port (no manual config needed)
 - Connects to XMTP dev network using your wallet
+- Saves port to `~/.bot-matcher/bridge_port` (all scripts auto-discover it)
 
 **FIRST check if already running:**
 ```bash
-python3 {baseDir}/scripts/xmtp_client.py health
+python3 {baseDir}/scripts/local_query.py ~/.bot-matcher status
 ```
 
 If it shows `"status": "connected"`, the bridge is already running.
@@ -561,7 +548,7 @@ npm install --production
 
 ### Bridge running but messages not arriving
 
-1. Check bridge health: `python3 {baseDir}/scripts/xmtp_client.py health`
-2. Check inbox: `python3 {baseDir}/scripts/xmtp_client.py inbox`
+1. Check bridge health: `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher status`
+2. Check inbox: `python3 {baseDir}/scripts/check_inbox.py ~/.bot-matcher`
 3. Verify the peer's wallet can receive XMTP:
-   `python3 {baseDir}/scripts/xmtp_client.py can-message <peer_wallet>`
+   `python3 {baseDir}/scripts/xmtp_client.py ~/.bot-matcher can-message <peer_wallet>`

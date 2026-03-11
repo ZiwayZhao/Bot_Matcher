@@ -4,12 +4,14 @@
 Reads wallet.json from the data directory, sets up environment variables,
 and launches the Node.js XMTP bridge. Manages the bridge lifecycle.
 
+The bridge port is auto-assigned (finds a free port starting from 3500)
+and saved to <data_dir>/bridge_port so other scripts can discover it.
+
 Usage:
-  python3 start_bridge.py <data_dir> [--env ENV] [--port PORT]
+  python3 start_bridge.py <data_dir> [--env ENV]
 
 Example:
   python3 start_bridge.py ~/.bot-matcher
-  python3 start_bridge.py ~/.bot-matcher --env production --port 3500
 
 Output (stdout): JSON with bridge status.
 """
@@ -17,12 +19,26 @@ Output (stdout): JSON with bridge status.
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError
+
+
+def find_free_port(start: int = 3500, attempts: int = 100) -> int:
+    """Find a free TCP port starting from `start`."""
+    for offset in range(attempts):
+        port = start + offset
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(f"No free port found in range {start}-{start + attempts}")
 
 
 def find_node() -> str:
@@ -68,9 +84,11 @@ def install_npm_deps(xmtp_dir: Path, node_path: str):
 def start_bridge(
     data_dir: Path,
     env: str = "dev",
-    port: int = 3500,
 ) -> dict:
-    """Start the XMTP bridge process."""
+    """Start the XMTP bridge process.
+
+    Port is auto-assigned and saved to <data_dir>/bridge_port.
+    """
     data_dir = data_dir.expanduser()
 
     # 1. Load wallet
@@ -102,22 +120,27 @@ def start_bridge(
         except RuntimeError as e:
             return {"error": str(e)}
 
-    # 5. Check if bridge already running
-    try:
-        req = Request(f"http://127.0.0.1:{port}/health")
-        with urlopen(req, timeout=3) as resp:
-            health = json.loads(resp.read())
-            if health.get("status") == "connected":
-                return {
-                    "status": "already_running",
-                    "address": health.get("address"),
-                    "env": health.get("env"),
-                    "port": port,
-                }
-    except (URLError, OSError):
-        pass  # Not running, continue to start
+    # 5. Check if bridge already running (read saved port)
+    port_file = data_dir / "bridge_port"
+    if port_file.exists():
+        try:
+            saved_port = int(port_file.read_text().strip())
+            req = Request(f"http://127.0.0.1:{saved_port}/health")
+            with urlopen(req, timeout=3) as resp:
+                health = json.loads(resp.read())
+                if health.get("status") == "connected":
+                    return {
+                        "status": "already_running",
+                        "address": health.get("address"),
+                        "env": health.get("env"),
+                        "port": saved_port,
+                    }
+        except (URLError, OSError, ValueError):
+            pass  # Not running or invalid, continue to start
 
-    # 6. Launch bridge process
+    # 6. Auto-find a free port and launch bridge
+    port = find_free_port()
+
     bridge_env = os.environ.copy()
     bridge_env["XMTP_PRIVATE_KEY"] = private_key
     bridge_env["XMTP_ENV"] = env
@@ -134,9 +157,11 @@ def start_bridge(
         stderr=subprocess.STDOUT,
     )
 
-    # Write PID file
+    # Write PID + port files
     pid_path = data_dir / "bridge.pid"
     pid_path.write_text(str(proc.pid))
+    port_file = data_dir / "bridge_port"
+    port_file.write_text(str(port))
 
     # 7. Wait for bridge to be ready (up to 30s)
     for attempt in range(30):
@@ -166,19 +191,22 @@ def start_bridge(
     return {"error": "Bridge started but did not become ready within 30 seconds", "pid": proc.pid}
 
 
-def stop_bridge(data_dir: Path, port: int = 3500) -> dict:
+def stop_bridge(data_dir: Path) -> dict:
     """Stop the running XMTP bridge."""
     data_dir = data_dir.expanduser()
     pid_path = data_dir / "bridge.pid"
+    port_file = data_dir / "bridge_port"
 
     if pid_path.exists():
         try:
             pid = int(pid_path.read_text().strip())
             os.kill(pid, signal.SIGTERM)
             pid_path.unlink(missing_ok=True)
+            port_file.unlink(missing_ok=True)
             return {"status": "stopped", "pid": pid}
         except (ProcessLookupError, ValueError):
             pid_path.unlink(missing_ok=True)
+            port_file.unlink(missing_ok=True)
             return {"status": "not_running"}
     return {"status": "not_running"}
 
@@ -190,16 +218,15 @@ def main():
     parser.add_argument("data_dir", help="Data directory (e.g. ~/.bot-matcher)")
     parser.add_argument("--env", default="dev", choices=["dev", "production", "local"],
                         help="XMTP environment (default: dev)")
-    parser.add_argument("--port", type=int, default=3500, help="Bridge HTTP port (default: 3500)")
     parser.add_argument("--stop", action="store_true", help="Stop the bridge instead of starting")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir).expanduser()
 
     if args.stop:
-        result = stop_bridge(data_dir, args.port)
+        result = stop_bridge(data_dir)
     else:
-        result = start_bridge(data_dir, args.env, args.port)
+        result = start_bridge(data_dir, args.env)
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
     if "error" in result:

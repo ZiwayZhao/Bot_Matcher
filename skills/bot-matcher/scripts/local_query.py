@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from xmtp_client import is_bridge_running, get_bridge_health
+from xmtp_client import configure, is_bridge_running, get_bridge_health
 
 
 def load_json(path: Path) -> dict:
@@ -219,6 +219,7 @@ def main():
         sys.exit(1)
 
     data_dir = Path(sys.argv[1]).expanduser()
+    configure(data_dir)
     command = sys.argv[2]
 
     if command == "status":

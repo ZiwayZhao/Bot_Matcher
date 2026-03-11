@@ -2,15 +2,16 @@
 """Python wrapper for the XMTP Bridge HTTP API.
 
 Provides simple functions for sending/receiving XMTP messages.
-The bridge must be running on localhost (default port 3500).
+The bridge port is auto-discovered from <data_dir>/bridge_port.
 
 Usage as a library:
-    from xmtp_client import send_xmtp, get_inbox, is_bridge_running
+    from xmtp_client import configure, send_xmtp, get_inbox, is_bridge_running
+    configure("~/.bot-matcher")   # reads port from bridge_port file
 
 Usage as CLI (for testing):
-    python3 xmtp_client.py health
-    python3 xmtp_client.py send <wallet_address> '{"protocol":"clawmatch",...}'
-    python3 xmtp_client.py inbox [--since ISO] [--clear]
+    python3 xmtp_client.py <data_dir> health
+    python3 xmtp_client.py <data_dir> send <wallet_address> '{"protocol":"clawmatch",...}'
+    python3 xmtp_client.py <data_dir> inbox [--since ISO] [--clear]
 """
 
 import json
@@ -20,12 +21,30 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 
-BRIDGE_URL = "http://127.0.0.1:3500"
+_bridge_url = "http://127.0.0.1:3500"  # default, overridden by configure()
+
+
+def configure(data_dir):
+    """Read bridge port from data_dir/bridge_port and set the bridge URL.
+
+    Call this once at startup before using any other function.
+    If the port file doesn't exist, falls back to default 3500.
+    """
+    global _bridge_url
+    port_file = Path(data_dir).expanduser() / "bridge_port"
+    if port_file.exists():
+        try:
+            port = int(port_file.read_text().strip())
+            _bridge_url = f"http://127.0.0.1:{port}"
+            return
+        except (ValueError, OSError):
+            pass
+    _bridge_url = "http://127.0.0.1:3500"
 
 
 def _request(method: str, path: str, body: dict = None, timeout: int = 30) -> dict:
     """Make an HTTP request to the local XMTP bridge."""
-    url = f"{BRIDGE_URL}{path}"
+    url = f"{_bridge_url}{path}"
     data = None
     if body is not None:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -154,15 +173,17 @@ def build_clawmatch_message(msg_type: str, payload: dict, sender_id: str = None)
 # ---------------------------------------------------------------------------
 
 def main():
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 3:
         print("Usage:")
-        print("  python3 xmtp_client.py health")
-        print("  python3 xmtp_client.py send <wallet_address> '<json_content>'")
-        print("  python3 xmtp_client.py inbox [--since ISO] [--clear]")
-        print("  python3 xmtp_client.py can-message <wallet_address>")
+        print("  python3 xmtp_client.py <data_dir> health")
+        print("  python3 xmtp_client.py <data_dir> send <wallet_address> '<json_content>'")
+        print("  python3 xmtp_client.py <data_dir> inbox [--since ISO] [--clear]")
+        print("  python3 xmtp_client.py <data_dir> can-message <wallet_address>")
         sys.exit(1)
 
-    cmd = sys.argv[1]
+    data_dir = sys.argv[1]
+    configure(data_dir)
+    cmd = sys.argv[2]
 
     if cmd == "health":
         try:
@@ -173,11 +194,11 @@ def main():
             sys.exit(1)
 
     elif cmd == "send":
-        if len(sys.argv) < 4:
-            print("Usage: python3 xmtp_client.py send <wallet_address> '<json_content>'")
+        if len(sys.argv) < 5:
+            print("Usage: python3 xmtp_client.py <data_dir> send <wallet_address> '<json_content>'")
             sys.exit(1)
-        to_addr = sys.argv[2]
-        content = json.loads(sys.argv[3])
+        to_addr = sys.argv[3]
+        content = json.loads(sys.argv[4])
         try:
             result = send_xmtp(to_addr, content)
             print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -188,7 +209,7 @@ def main():
     elif cmd == "inbox":
         since = None
         clear = False
-        args = sys.argv[2:]
+        args = sys.argv[3:]
         i = 0
         while i < len(args):
             if args[i] == "--since" and i + 1 < len(args):
@@ -203,10 +224,10 @@ def main():
         print(json.dumps({"messages": messages, "count": len(messages)}, indent=2, ensure_ascii=False))
 
     elif cmd == "can-message":
-        if len(sys.argv) < 3:
-            print("Usage: python3 xmtp_client.py can-message <wallet_address>")
+        if len(sys.argv) < 4:
+            print("Usage: python3 xmtp_client.py <data_dir> can-message <wallet_address>")
             sys.exit(1)
-        addr = sys.argv[2]
+        addr = sys.argv[3]
         try:
             result = can_message(addr)
             print(json.dumps({"address": addr, "canMessage": result}))

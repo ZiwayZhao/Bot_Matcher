@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from xmtp_client import send_xmtp, build_clawmatch_message, is_bridge_running
+from xmtp_client import configure, send_xmtp, build_clawmatch_message, is_bridge_running
 
 
 def main():
@@ -25,6 +25,7 @@ def main():
         sys.exit(1)
 
     data_dir = Path(sys.argv[1]).expanduser()
+    configure(data_dir)
     peer_wallet = sys.argv[2]
     message_text = sys.argv[3]
 

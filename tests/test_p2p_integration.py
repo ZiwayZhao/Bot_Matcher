@@ -163,8 +163,13 @@ def link_bridges(bridge_a, bridge_b):
 # Test Data Helpers
 # ---------------------------------------------------------------------------
 
-def make_data_dir(peer_id: str = "test_alice", wallet_address: str = "0xaaa") -> Path:
-    """Create a temporary data directory with basic config and wallet."""
+def make_data_dir(peer_id: str = "test_alice", wallet_address: str = "0xaaa",
+                   bridge_port: int = None) -> Path:
+    """Create a temporary data directory with basic config and wallet.
+
+    If bridge_port is given, writes a bridge_port file so that
+    xmtp_client.configure(data_dir) discovers the mock bridge port.
+    """
     d = Path(tempfile.mkdtemp(prefix="clawmatch_test_"))
     for sub in ("inbox", "messages", "matches", "conversations", "criteria", "handshakes"):
         (d / sub).mkdir()
@@ -192,6 +197,10 @@ def make_data_dir(peer_id: str = "test_alice", wallet_address: str = "0xaaa") ->
         "network": "sepolia",
         "communication": "xmtp",
     }, indent=2))
+
+    # bridge_port — for xmtp_client.configure(data_dir) auto-discovery
+    if bridge_port is not None:
+        (d / "bridge_port").write_text(str(bridge_port))
 
     # profile_public.md
     (d / "profile_public.md").write_text(
@@ -228,12 +237,9 @@ class TestSuite1_E2E(unittest.TestCase):
         cls.bridge_b, cls.port_b = start_mock_bridge(cls.bob_wallet)
         link_bridges(cls.bridge_a, cls.bridge_b)
 
-        cls.alice_dir = make_data_dir("alice", cls.alice_wallet)
-        cls.bob_dir = make_data_dir("bob", cls.bob_wallet)
-
-        # Patch BRIDGE_URL for alice's scripts
-        cls.alice_bridge_url = f"http://127.0.0.1:{cls.port_a}"
-        cls.bob_bridge_url = f"http://127.0.0.1:{cls.port_b}"
+        # Each data_dir gets a bridge_port file pointing to its mock bridge
+        cls.alice_dir = make_data_dir("alice", cls.alice_wallet, bridge_port=cls.port_a)
+        cls.bob_dir = make_data_dir("bob", cls.bob_wallet, bridge_port=cls.port_b)
 
     @classmethod
     def tearDownClass(cls):
@@ -242,21 +248,11 @@ class TestSuite1_E2E(unittest.TestCase):
         cleanup_data_dir(cls.alice_dir)
         cleanup_data_dir(cls.bob_dir)
 
-    def _call_script(self, script, args, bridge_url):
-        """Run a Python script with patched BRIDGE_URL."""
-        env = os.environ.copy()
-        result = subprocess.run(
-            [sys.executable, "-c", f"""
-import sys, json
-sys.path.insert(0, '{SCRIPTS_DIR}')
-import xmtp_client
-xmtp_client.BRIDGE_URL = '{bridge_url}'
-# Now run the actual script logic
-""" + Path(script).read_text(encoding="utf-8").replace("if __name__", "if True  # __name__")],
-            capture_output=True, text=True, timeout=15,
-            env=env,
-        )
-        return result
+    def _configure_for(self, data_dir):
+        """Configure xmtp_client to use the bridge_port from a data_dir."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import xmtp_client
+        xmtp_client.configure(data_dir)
 
     def test_01_bridge_health(self):
         """Both mock bridges respond to health check."""
@@ -267,11 +263,9 @@ xmtp_client.BRIDGE_URL = '{bridge_url}'
 
     def test_02_send_card_via_xmtp(self):
         """Alice sends a card to Bob via XMTP."""
-        # Simulate what send_card.py does
         sys.path.insert(0, str(SCRIPTS_DIR))
-        import importlib
         import xmtp_client
-        xmtp_client.BRIDGE_URL = self.alice_bridge_url
+        xmtp_client.configure(self.alice_dir)  # reads bridge_port → port_a
 
         profile = (self.alice_dir / "profile_public.md").read_text()
         card_msg = xmtp_client.build_clawmatch_message("card", {
@@ -294,7 +288,7 @@ xmtp_client.BRIDGE_URL = '{bridge_url}'
     def test_03_send_message_via_xmtp(self):
         """Alice sends a conversation message to Bob."""
         import xmtp_client
-        xmtp_client.BRIDGE_URL = self.alice_bridge_url
+        xmtp_client.configure(self.alice_dir)
 
         msg = xmtp_client.build_clawmatch_message("message", {
             "content": "Hey Bob, love your profile!",
@@ -307,7 +301,7 @@ xmtp_client.BRIDGE_URL = '{bridge_url}'
     def test_04_receive_and_process_inbox(self):
         """Bob pulls messages from XMTP and processes them."""
         import xmtp_client
-        xmtp_client.BRIDGE_URL = self.bob_bridge_url
+        xmtp_client.configure(self.bob_dir)
 
         # Get inbox
         messages = xmtp_client.get_inbox(clear=False)
@@ -321,7 +315,7 @@ xmtp_client.BRIDGE_URL = '{bridge_url}'
     def test_05_connection_request_flow(self):
         """Alice sends connection request, Bob receives it."""
         import xmtp_client
-        xmtp_client.BRIDGE_URL = self.alice_bridge_url
+        xmtp_client.configure(self.alice_dir)
 
         # Clear bob's inbox first
         self.bridge_b.inbox.clear()
@@ -335,7 +329,7 @@ xmtp_client.BRIDGE_URL = '{bridge_url}'
         self.assertEqual(result["status"], "sent")
 
         # Bob processes inbox
-        xmtp_client.BRIDGE_URL = self.bob_bridge_url
+        xmtp_client.configure(self.bob_dir)
         messages = xmtp_client.get_inbox(clear=True)
         self.assertEqual(len(messages), 1)
         parsed = xmtp_client.parse_clawmatch_message(messages[0]["content"])
@@ -375,7 +369,7 @@ xmtp_client.BRIDGE_URL = '{bridge_url}'
         import importlib
         import local_query
         import xmtp_client
-        xmtp_client.BRIDGE_URL = self.bob_bridge_url
+        xmtp_client.configure(self.bob_dir)
 
         result = local_query.cmd_accept(self.bob_dir, "alice")
         self.assertEqual(result["status"], "accepted")
@@ -390,7 +384,7 @@ xmtp_client.BRIDGE_URL = '{bridge_url}'
         import xmtp_client
 
         # Alice → Bob
-        xmtp_client.BRIDGE_URL = self.alice_bridge_url
+        xmtp_client.configure(self.alice_dir)
         self.bridge_b.inbox.clear()
         msg1 = xmtp_client.build_clawmatch_message("message", {
             "content": "Round 1 from Alice",
@@ -400,7 +394,7 @@ xmtp_client.BRIDGE_URL = '{bridge_url}'
         self.assertEqual(len(self.bridge_b.inbox), 1)
 
         # Bob → Alice
-        xmtp_client.BRIDGE_URL = self.bob_bridge_url
+        xmtp_client.configure(self.bob_dir)
         self.bridge_a.inbox.clear()
         msg2 = xmtp_client.build_clawmatch_message("message", {
             "content": "Reply from Bob",
@@ -724,14 +718,17 @@ class TestSuite4_XMTPClient(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.bridge, cls.port = start_mock_bridge("0xclient_test")
+        # Create a data_dir with bridge_port so configure() works
+        cls.data_dir = make_data_dir("client_test", "0xclient_test", bridge_port=cls.port)
         sys.path.insert(0, str(SCRIPTS_DIR))
         import xmtp_client
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{cls.port}"
+        xmtp_client.configure(cls.data_dir)
         cls.xmtp_client = xmtp_client
 
     @classmethod
     def tearDownClass(cls):
         cls.bridge.shutdown()
+        cleanup_data_dir(cls.data_dir)
 
     def test_01_is_bridge_running(self):
         """is_bridge_running returns True when bridge is up."""
@@ -833,8 +830,8 @@ class TestSuite5_DualAgent(unittest.TestCase):
         cls.bridge_b, cls.port_b = start_mock_bridge(cls.bob_wallet)
         link_bridges(cls.bridge_a, cls.bridge_b)
 
-        cls.alice_dir = make_data_dir("dual_alice", cls.alice_wallet)
-        cls.bob_dir = make_data_dir("dual_bob", cls.bob_wallet)
+        cls.alice_dir = make_data_dir("dual_alice", cls.alice_wallet, bridge_port=cls.port_a)
+        cls.bob_dir = make_data_dir("dual_bob", cls.bob_wallet, bridge_port=cls.port_b)
 
         # Set up peer info
         (cls.alice_dir / "peers.json").write_text(json.dumps({
@@ -856,7 +853,7 @@ class TestSuite5_DualAgent(unittest.TestCase):
     def test_01_full_card_exchange(self):
         """Full card exchange: Alice sends card, Bob processes it."""
         import xmtp_client
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{self.port_a}"
+        xmtp_client.configure(self.alice_dir)
 
         # Alice sends card
         profile = (self.alice_dir / "profile_public.md").read_text()
@@ -868,7 +865,7 @@ class TestSuite5_DualAgent(unittest.TestCase):
         xmtp_client.send_xmtp(self.bob_wallet, card_msg)
 
         # Bob processes inbox
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{self.port_b}"
+        xmtp_client.configure(self.bob_dir)
         from check_inbox import pull_xmtp_messages
         pulled = pull_xmtp_messages(self.bob_dir)
         self.assertGreater(pulled, 0)
@@ -887,7 +884,7 @@ class TestSuite5_DualAgent(unittest.TestCase):
         self.bridge_b.inbox.clear()
 
         # Alice sends connection request
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{self.port_a}"
+        xmtp_client.configure(self.alice_dir)
         connect_msg = xmtp_client.build_clawmatch_message("connect", {
             "wallet_address": self.alice_wallet,
             "agent_id": 42,
@@ -895,7 +892,7 @@ class TestSuite5_DualAgent(unittest.TestCase):
         xmtp_client.send_xmtp(self.bob_wallet, connect_msg)
 
         # Bob processes
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{self.port_b}"
+        xmtp_client.configure(self.bob_dir)
         from check_inbox import pull_xmtp_messages
         pull_xmtp_messages(self.bob_dir)
 
@@ -933,7 +930,7 @@ class TestSuite5_DualAgent(unittest.TestCase):
         """water_tree sends via XMTP and updates handshake."""
         import xmtp_client
         import water_tree
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{self.port_a}"
+        xmtp_client.configure(self.alice_dir)
 
         # Set up handshake with revealed visibility
         handshake = {
@@ -965,7 +962,7 @@ class TestSuite5_DualAgent(unittest.TestCase):
     def test_05_concurrent_messaging(self):
         """Multiple concurrent messages don't corrupt data."""
         import xmtp_client
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{self.port_a}"
+        xmtp_client.configure(self.alice_dir)
         self.bridge_b.inbox.clear()
 
         def send_msg(n):
@@ -990,7 +987,7 @@ class TestSuite5_DualAgent(unittest.TestCase):
     def test_06_message_type_routing(self):
         """Different message types are routed correctly."""
         import xmtp_client
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{self.port_a}"
+        xmtp_client.configure(self.alice_dir)
         self.bridge_b.inbox.clear()
 
         # Send different types
@@ -1008,7 +1005,7 @@ class TestSuite5_DualAgent(unittest.TestCase):
         self.assertEqual(len(self.bridge_b.inbox), 4)
 
         # Process and verify routing
-        xmtp_client.BRIDGE_URL = f"http://127.0.0.1:{self.port_b}"
+        xmtp_client.configure(self.bob_dir)
         from check_inbox import pull_xmtp_messages
         pulled = pull_xmtp_messages(self.bob_dir)
         self.assertEqual(pulled, 4)

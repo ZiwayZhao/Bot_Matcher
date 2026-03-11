@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from xmtp_client import get_inbox, is_bridge_running, parse_clawmatch_message
+from xmtp_client import configure, get_inbox, is_bridge_running, parse_clawmatch_message
 
 
 def pull_xmtp_messages(data_dir: Path) -> int:
@@ -162,6 +162,7 @@ def main():
         sys.exit(1)
 
     data_dir = Path(sys.argv[1]).expanduser()
+    configure(data_dir)
     inbox_dir = data_dir / "inbox"
     matches_dir = data_dir / "matches"
     messages_dir = data_dir / "messages"

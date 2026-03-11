@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from xmtp_client import send_xmtp, build_clawmatch_message, is_bridge_running
+from xmtp_client import configure, send_xmtp, build_clawmatch_message, is_bridge_running
 
 
 def load_json(path: Path) -> dict:
@@ -149,6 +149,7 @@ def get_peer_wallet(data_dir: Path, peer_id: str) -> str:
 def water_tree(data_dir: Path, peer_id: str, topic: str, message: str) -> dict:
     """Execute the full watering flow."""
     data_dir = data_dir.expanduser()
+    configure(data_dir)
 
     # 0. Check bridge
     if not is_bridge_running():
