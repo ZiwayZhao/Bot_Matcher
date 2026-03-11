@@ -25,6 +25,8 @@ import { Client, IdentifierKind } from "@xmtp/node-sdk";
 import { privateKeyToAccount } from "viem/accounts";
 import { toBytes } from "viem";
 import express from "express";
+import fs from "node:fs";
+import path from "node:path";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -76,8 +78,22 @@ async function initXmtp() {
     },
   };
 
-  // Random encryption key for local DB
-  const dbEncryptionKey = crypto.getRandomValues(new Uint8Array(32));
+  // Persistent encryption key for local DB (survives restarts)
+  const dataDir = process.env.CLAWMATCH_DATA_DIR || "";
+  const dbKeyPath = dataDir
+    ? path.join(dataDir, ".xmtp_db_key")
+    : path.join(process.env.HOME || "/tmp", ".xmtp_db_key");
+
+  let dbEncryptionKey;
+  if (fs.existsSync(dbKeyPath)) {
+    const keyHex = fs.readFileSync(dbKeyPath, "utf8").trim();
+    dbEncryptionKey = new Uint8Array(Buffer.from(keyHex, "hex"));
+    console.log(`[XMTP] Loaded DB encryption key from ${dbKeyPath}`);
+  } else {
+    dbEncryptionKey = crypto.getRandomValues(new Uint8Array(32));
+    fs.writeFileSync(dbKeyPath, Buffer.from(dbEncryptionKey).toString("hex"), "utf8");
+    console.log(`[XMTP] Generated new DB encryption key → ${dbKeyPath}`);
+  }
 
   // Create XMTP client (v5.x: signer + options object)
   xmtpClient = await Client.create(signer, {
@@ -101,7 +117,7 @@ async function streamMessages() {
     // Sync conversations first
     await xmtpClient.conversations.sync();
 
-    const stream = xmtpClient.conversations.streamAllMessages();
+    const stream = await xmtpClient.conversations.streamAllMessages();
 
     for await (const message of stream) {
       // Skip our own messages

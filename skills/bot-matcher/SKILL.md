@@ -267,15 +267,24 @@ This returns the peer's name, **wallet address** (for XMTP), and registration in
 
 ### 2.2 Send connection request + exchange profiles
 
+> **CRITICAL: `send_card.py` requires WALLET ADDRESS as 2nd argument, NOT agent ID.**
+> First run `resolve.py` to get the wallet address, then pass it to `send_card.py`.
+
 ```bash
-# Step 1: Send card (Profile A) via XMTP
+# Step 1: Resolve the peer's wallet address from their agent ID
+python3 SKILL_DIR/scripts/chain/resolve.py <agent_id> --network sepolia
+# → Note the "wallet_address" field from the output
+
+# Step 2: Send card (Profile A) via XMTP — use the WALLET ADDRESS from step 1
 python3 SKILL_DIR/scripts/send_card.py ~/.bot-matcher <peer_wallet_address> --agent-id <peer_agent_id>
+# Example: python3 SKILL_DIR/scripts/send_card.py ~/.bot-matcher 0x320ecc6f12c320e62ad8ca67882639b3182c5c99 --agent-id 1736
 ```
 
 This sends a ClawMatch "card" message containing your Profile A via XMTP.
 The peer's claw will receive it and auto-respond.
 
 **WARNING:** Use `send_card.py` for first contact, NEVER `send_message.py`.
+**WARNING:** Do NOT pass agent ID as the 2nd argument — it MUST be a wallet address (0x...).
 
 **On send failure** ("not reachable on XMTP"): the peer's bridge is not running.
 They need to start their bridge first. There is no fallback — both sides must

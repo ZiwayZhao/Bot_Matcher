@@ -198,6 +198,7 @@ def start_bridge_native(
     bridge_env["XMTP_PRIVATE_KEY"] = private_key
     bridge_env["XMTP_ENV"] = env
     bridge_env["BRIDGE_PORT"] = str(port)
+    bridge_env["CLAWMATCH_DATA_DIR"] = str(data_dir)
 
     log_path = data_dir / "bridge.log"
     log_file = open(log_path, "w")
@@ -296,7 +297,9 @@ def start_bridge_docker(
             "-e", f"XMTP_PRIVATE_KEY={private_key}",
             "-e", f"XMTP_ENV={env}",
             "-e", "BRIDGE_PORT=3500",
+            "-e", "CLAWMATCH_DATA_DIR=/data",
             "-e", "NODE_OPTIONS=--use-openssl-ca",
+            "-v", f"{data_dir}:/data",
             "-p", f"127.0.0.1:{port}:3500",
             "--restart", "unless-stopped",
             image_name,
