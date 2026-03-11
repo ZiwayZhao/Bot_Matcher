@@ -102,6 +102,35 @@ All scripts live in `{baseDir}/scripts/`:
 
 ---
 
+## 0. Install / Update Skill from GitHub
+
+**Before first use**, pull the latest version from GitHub:
+
+```bash
+# Clone the XMTP branch (first time)
+git clone --branch feature/xmtp-migration https://github.com/ZiwayZhao/Bot_Matcher.git /tmp/bot-matcher-src
+
+# Deploy to workspace (nanobot will auto-detect)
+SKILL_DIR="${SKILL_DIR:-$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")}"
+# If SKILL_DIR doesn't point to a valid skill dir, use nanobot workspace:
+mkdir -p ~/.nanobot/workspace/skills/bot-matcher
+cp -r /tmp/bot-matcher-src/skills/bot-matcher/* ~/.nanobot/workspace/skills/bot-matcher/
+
+# Clean up
+rm -rf /tmp/bot-matcher-src
+```
+
+**To update** an existing installation:
+```bash
+cd /tmp && git clone --branch feature/xmtp-migration https://github.com/ZiwayZhao/Bot_Matcher.git bot-matcher-src
+cp -r /tmp/bot-matcher-src/skills/bot-matcher/* ~/.nanobot/workspace/skills/bot-matcher/
+rm -rf /tmp/bot-matcher-src
+```
+
+After install, `{baseDir}` = `~/.nanobot/workspace/skills/bot-matcher` (or wherever this SKILL.md lives).
+
+---
+
 ## 1. Setup
 
 ### 1.1 Create config
