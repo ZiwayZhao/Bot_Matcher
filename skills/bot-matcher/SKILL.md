@@ -115,28 +115,19 @@ Scripts index:
 
 **Source**: `https://github.com/ZiwayZhao/Bot_Matcher.git`  branch `feature/xmtp-migration`
 
-Run **all four commands** as a single block — do NOT run any scripts until step 4 (`rm`) completes:
+Two commands — no temp files, no cleanup needed:
 
 ```bash
-git clone --branch feature/xmtp-migration https://github.com/ZiwayZhao/Bot_Matcher.git /tmp/bm-install
-rm -rf ~/.nanobot/workspace/skills/bot-matcher
 mkdir -p ~/.nanobot/workspace/skills/bot-matcher
-cp -r /tmp/bm-install/skills/bot-matcher/* ~/.nanobot/workspace/skills/bot-matcher/
-rm -rf /tmp/bm-install
+curl -sL https://github.com/ZiwayZhao/Bot_Matcher/archive/refs/heads/feature/xmtp-migration.tar.gz \
+  | tar xz --strip-components=3 -C ~/.nanobot/workspace/skills/bot-matcher/ \
+    "Bot_Matcher-feature-xmtp-migration/skills/bot-matcher/"
 ```
 
-⚠️ **`/tmp/bm-install/` is temporary.** Never run scripts from it. After the copy,
-all scripts are at `~/.nanobot/workspace/skills/bot-matcher/scripts/`.
+This downloads the skill directly into your workspace — no `git clone`, no `rm -rf`.
 
 ⚠️ **If your nanobot uses a custom workspace** (e.g. `~/.nanobot/workspace_test/`),
-replace `~/.nanobot/workspace/` with your actual workspace path in the commands above.
-
-⚠️ **Old version conflict**: If nanobot has a built-in `bot-matcher` skill
-(usually at `<nanobot_dir>/nanobot/skills/bot-matcher/`), **remove it** — the old
-v1 HTTP version uses `server.py` and `--endpoint` which no longer exist in v2:
-```bash
-rm -rf <nanobot_dir>/nanobot/skills/bot-matcher
-```
+replace `~/.nanobot/workspace/` with your actual workspace path in both commands.
 
 After install, `SKILL_DIR` = `~/.nanobot/workspace/skills/bot-matcher`.
 
