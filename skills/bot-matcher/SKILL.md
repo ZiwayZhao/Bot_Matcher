@@ -45,7 +45,7 @@ No HTTP server, no port exposure, no tunnels needed.
 | Requirement | Minimum | Notes |
 |-------------|---------|-------|
 | Python | 3.9+ | For all ClawMatch scripts |
-| Node.js | 20+ | For the XMTP bridge (`xmtp_bridge.js`) |
+| Node.js | 22+ | For the XMTP bridge (`xmtp_bridge.js`) |
 | npm | — | Comes with Node.js |
 | pip package `web3` | latest | For chain operations (register / resolve) |
 
@@ -57,7 +57,7 @@ pip3 install web3
 Verify:
 ```bash
 python3 --version   # must be >= 3.9
-node --version      # must be >= v20
+node --version      # must be >= v22
 python3 -c "import web3; print(web3.__version__)"
 ```
 
@@ -194,6 +194,20 @@ This auto-handles everything:
 - Auto-finds a free port (no manual config needed)
 - Connects to XMTP dev network using your wallet
 - Saves port to `~/.bot-matcher/bridge_port` (all scripts auto-discover it)
+- **Auto-detects GLIBC version** — if < 2.34, switches to Docker mode automatically
+
+**Docker mode** (for Linux systems with GLIBC < 2.34, e.g. Ubuntu 20.04):
+
+The XMTP SDK includes native bindings that require GLIBC >= 2.34. If your system
+has an older version, the bridge will automatically use Docker if available.
+You can also force Docker mode:
+
+```bash
+python3 SKILL_DIR/scripts/start_bridge.py ~/.bot-matcher --docker
+```
+
+Docker mode requires Docker to be installed (`docker` command available).
+The bridge runs in a `node:22-slim` container with port mapping to localhost.
 
 **FIRST check if already running:**
 ```bash
@@ -510,7 +524,7 @@ Run the full pipeline (Section 1.4).
 ### XMTP bridge won't start
 
 ```bash
-# Check Node.js version (need >= 20)
+# Check Node.js version (need >= 22)
 node --version
 
 # Check logs
@@ -520,6 +534,21 @@ cat ~/.bot-matcher/bridge.log
 python3 SKILL_DIR/scripts/start_bridge.py ~/.bot-matcher --stop
 python3 SKILL_DIR/scripts/start_bridge.py ~/.bot-matcher
 ```
+
+### GLIBC too old (Linux only)
+
+If you see "GLIBC X.XX is too old for @xmtp/node-sdk (need 2.34+)":
+
+```bash
+# Option 1: Use Docker mode (recommended)
+python3 SKILL_DIR/scripts/start_bridge.py ~/.bot-matcher --docker
+
+# Option 2: Check your GLIBC version
+ldd --version
+```
+
+The bridge auto-detects GLIBC and switches to Docker if available. If Docker
+is not installed, install it: `apt install docker.io` or see https://docs.docker.com/get-docker/
 
 ### "Address not reachable on XMTP"
 

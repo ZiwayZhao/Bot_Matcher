@@ -6,6 +6,8 @@
  * listens for incoming XMTP messages, and exposes a local HTTP API
  * so Python scripts can send/receive messages without Node.js deps.
  *
+ * Compatible with @xmtp/node-sdk v5.x API.
+ *
  * Env vars:
  *   XMTP_PRIVATE_KEY  — hex private key (from wallet.json)
  *   XMTP_ENV          — "dev" | "production" | "local" (default: "dev")
@@ -16,12 +18,12 @@
  *   GET  /inbox        — get buffered incoming messages [?since=ISO&clear=1]
  *   GET  /health       — bridge status {connected, address, env, inbox_count}
  *   POST /clear-inbox  — clear the inbox buffer
+ *   GET  /can-message   — check if address can receive XMTP {?address=0x...}
  */
 
-import { createSigner, createUser, getInboxIdForAddress } from "@xmtp/node-sdk";
-import { createWalletClient, http, toBytes } from "viem";
+import { Client, IdentifierKind } from "@xmtp/node-sdk";
 import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import { toBytes } from "viem";
 import express from "express";
 
 // ---------------------------------------------------------------------------
@@ -48,7 +50,7 @@ function addToInbox(msg) {
 }
 
 // ---------------------------------------------------------------------------
-// XMTP Client Setup
+// XMTP Client Setup (v5.x API)
 // ---------------------------------------------------------------------------
 let xmtpClient = null;
 let walletAddress = "";
@@ -61,16 +63,25 @@ async function initXmtp() {
   console.log(`[XMTP] Wallet: ${walletAddress}`);
   console.log(`[XMTP] Environment: ${XMTP_ENV}`);
 
-  // Create signer from private key
-  const encryptionKey = crypto.getRandomValues(new Uint8Array(32));
-  const signer = createSigner(key);
-  const user = createUser(key);
+  // v5.x Signer: plain object with getIdentifier() and signMessage()
+  const signer = {
+    type: "EOA",
+    getIdentifier: () => ({
+      identifier: walletAddress,
+      identifierKind: IdentifierKind.Ethereum,
+    }),
+    signMessage: async (message) => {
+      const sig = await account.signMessage({ message });
+      return toBytes(sig);
+    },
+  };
 
-  // Import the Client dynamically
-  const { Client } = await import("@xmtp/node-sdk");
+  // Random encryption key for local DB
+  const dbEncryptionKey = crypto.getRandomValues(new Uint8Array(32));
 
-  // Create XMTP client
-  xmtpClient = await Client.create(user, encryptionKey, {
+  // Create XMTP client (v5.x: signer + options object)
+  xmtpClient = await Client.create(signer, {
+    dbEncryptionKey,
     env: XMTP_ENV,
   });
 
@@ -116,6 +127,16 @@ async function streamMessages() {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: create identifier object for XMTP v5.x
+// ---------------------------------------------------------------------------
+function ethIdentifier(address) {
+  return {
+    identifier: address.toLowerCase(),
+    identifierKind: IdentifierKind.Ethereum,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Express HTTP API (localhost only)
 // ---------------------------------------------------------------------------
 const app = express();
@@ -143,9 +164,10 @@ app.post("/send", async (req, res) => {
 
     const targetAddress = to.toLowerCase();
 
-    // Check if the target can receive XMTP messages
-    const canMessage = await xmtpClient.canMessage([targetAddress]);
-    if (!canMessage.get(targetAddress)) {
+    // Check if the target can receive XMTP messages (v5.x: uses identifiers)
+    const canMessageResult = await xmtpClient.canMessage([ethIdentifier(targetAddress)]);
+    const canSend = canMessageResult.get(targetAddress);
+    if (!canSend) {
       return res.status(404).json({
         error: `Address ${targetAddress} is not reachable on XMTP (${XMTP_ENV}). They need to start their bridge first.`,
       });
@@ -154,19 +176,21 @@ app.post("/send", async (req, res) => {
     // Sync conversations
     await xmtpClient.conversations.sync();
 
-    // Create or get DM conversation
-    const conversation = await xmtpClient.conversations.newDm(targetAddress);
-    await conversation.sync();
+    // Create or get DM conversation (v5.x: createDmWithIdentifier)
+    const dm = await xmtpClient.conversations.createDmWithIdentifier(
+      ethIdentifier(targetAddress)
+    );
+    await dm.sync();
 
-    // Send message (serialize as JSON string if content is object)
+    // Send message (v5.x: sendText instead of send)
     const messageText = typeof content === "string" ? content : JSON.stringify(content);
-    const msgId = await conversation.send(messageText);
+    const msgId = await dm.sendText(messageText);
 
     res.json({
       status: "sent",
       messageId: msgId,
       to: targetAddress,
-      conversationId: conversation.id,
+      conversationId: dm.id,
     });
   } catch (err) {
     console.error("[XMTP] Send error:", err.message);
@@ -200,15 +224,15 @@ app.post("/clear-inbox", (_req, res) => {
   res.json({ cleared: count });
 });
 
-// Resolve: check if an address can receive XMTP messages
+// Check if an address can receive XMTP messages
 app.get("/can-message", async (req, res) => {
   try {
     const address = req.query.address?.toLowerCase();
     if (!address) {
       return res.status(400).json({ error: "missing 'address' query param" });
     }
-    const canMessage = await xmtpClient.canMessage([address]);
-    res.json({ address, canMessage: canMessage.get(address) || false });
+    const result = await xmtpClient.canMessage([ethIdentifier(address)]);
+    res.json({ address, canMessage: result.get(address) || false });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
