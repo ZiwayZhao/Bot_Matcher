@@ -82,23 +82,32 @@ During setup:
 mkdir -p ~/.bot-matcher/{inbox,messages,matches,conversations,criteria,handshakes}
 ```
 
-## Important: Script Paths
+## ⚠️ SKILL_DIR — Read This First
 
-All scripts live in `{baseDir}/scripts/`:
+`SKILL_DIR` = **the directory that contains this SKILL.md file**.
 
+After install from GitHub (Section 0): `SKILL_DIR` = `~/.nanobot/workspace/skills/bot-matcher`
+
+Every command in this document follows this pattern:
 ```
-{baseDir}/scripts/start_bridge.py       ← start the XMTP bridge (Node.js)
-{baseDir}/scripts/xmtp_client.py        ← Python XMTP client wrapper
-{baseDir}/scripts/send_card.py          ← send Profile A via XMTP
-{baseDir}/scripts/send_message.py       ← send conversation/water message via XMTP
-{baseDir}/scripts/check_inbox.py        ← pull XMTP messages + check local data
-{baseDir}/scripts/water_tree.py         ← water a tree branch (send + update handshake)
-{baseDir}/scripts/check_trees.py        ← proactive watering reminders
-{baseDir}/scripts/local_query.py        ← query local data (status, forest, handshakes)
-{baseDir}/scripts/chain/register.py     ← register claw on ERC-8004
-{baseDir}/scripts/chain/resolve.py      ← look up claw by agent ID
-{baseDir}/scripts/xmtp/xmtp_bridge.js   ← Node.js XMTP bridge (managed by start_bridge.py)
+python3 SKILL_DIR/scripts/<script>.py ~/.bot-matcher [args...]
 ```
+
+**Replace `SKILL_DIR`** with the real absolute path before running any command.
+
+Scripts index:
+| Script | Purpose |
+|--------|---------|
+| `SKILL_DIR/scripts/start_bridge.py` | Start/stop XMTP bridge |
+| `SKILL_DIR/scripts/xmtp_client.py` | Python XMTP wrapper + CLI |
+| `SKILL_DIR/scripts/send_card.py` | Send Profile A via XMTP |
+| `SKILL_DIR/scripts/send_message.py` | Send conversation/water message |
+| `SKILL_DIR/scripts/check_inbox.py` | Pull XMTP messages + scan local |
+| `SKILL_DIR/scripts/water_tree.py` | Water a tree branch |
+| `SKILL_DIR/scripts/check_trees.py` | Proactive watering reminders |
+| `SKILL_DIR/scripts/local_query.py` | Query local data |
+| `SKILL_DIR/scripts/chain/register.py` | Register on ERC-8004 |
+| `SKILL_DIR/scripts/chain/resolve.py` | Look up claw by agent ID |
 
 ---
 
@@ -106,14 +115,30 @@ All scripts live in `{baseDir}/scripts/`:
 
 **Source**: `https://github.com/ZiwayZhao/Bot_Matcher.git`  branch `feature/xmtp-migration`
 
+Run **all four commands** as a single block — do NOT run any scripts until step 4 (`rm`) completes:
+
 ```bash
-git clone --branch feature/xmtp-migration https://github.com/ZiwayZhao/Bot_Matcher.git /tmp/bm
+git clone --branch feature/xmtp-migration https://github.com/ZiwayZhao/Bot_Matcher.git /tmp/bm-install
+rm -rf ~/.nanobot/workspace/skills/bot-matcher
 mkdir -p ~/.nanobot/workspace/skills/bot-matcher
-cp -r /tmp/bm/skills/bot-matcher/* ~/.nanobot/workspace/skills/bot-matcher/
-rm -rf /tmp/bm
+cp -r /tmp/bm-install/skills/bot-matcher/* ~/.nanobot/workspace/skills/bot-matcher/
+rm -rf /tmp/bm-install
 ```
 
-After install, `{baseDir}` = `~/.nanobot/workspace/skills/bot-matcher` (or wherever this SKILL.md lives).
+⚠️ **`/tmp/bm-install/` is temporary.** Never run scripts from it. After the copy,
+all scripts are at `~/.nanobot/workspace/skills/bot-matcher/scripts/`.
+
+⚠️ **If your nanobot uses a custom workspace** (e.g. `~/.nanobot/workspace_test/`),
+replace `~/.nanobot/workspace/` with your actual workspace path in the commands above.
+
+⚠️ **Old version conflict**: If nanobot has a built-in `bot-matcher` skill
+(usually at `<nanobot_dir>/nanobot/skills/bot-matcher/`), **remove it** — the old
+v1 HTTP version uses `server.py` and `--endpoint` which no longer exist in v2:
+```bash
+rm -rf <nanobot_dir>/nanobot/skills/bot-matcher
+```
+
+After install, `SKILL_DIR` = `~/.nanobot/workspace/skills/bot-matcher`.
 
 ---
 
@@ -137,7 +162,7 @@ Read `~/.bot-matcher/config.json`. If it doesn't exist, create it:
 **Prerequisite**: `pip install web3` (needed for on-chain operations).
 
 ```bash
-python3 {baseDir}/scripts/chain/register.py ~/.bot-matcher --name <peer_id> --network sepolia
+python3 SKILL_DIR/scripts/chain/register.py ~/.bot-matcher --name <peer_id> --network sepolia
 ```
 
 This:
@@ -169,7 +194,7 @@ The XMTP bridge is a Node.js process that connects to the XMTP network.
 It runs locally and provides a simple HTTP API for Python scripts.
 
 ```bash
-python3 {baseDir}/scripts/start_bridge.py ~/.bot-matcher
+python3 SKILL_DIR/scripts/start_bridge.py ~/.bot-matcher
 ```
 
 This auto-handles everything:
@@ -181,19 +206,19 @@ This auto-handles everything:
 
 **FIRST check if already running:**
 ```bash
-python3 {baseDir}/scripts/local_query.py ~/.bot-matcher status
+python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher status
 ```
 
 If it shows `"status": "connected"`, the bridge is already running.
 
 **To stop the bridge:**
 ```bash
-python3 {baseDir}/scripts/start_bridge.py ~/.bot-matcher --stop
+python3 SKILL_DIR/scripts/start_bridge.py ~/.bot-matcher --stop
 ```
 
 **Verify bridge is working:**
 ```bash
-python3 {baseDir}/scripts/xmtp_client.py health
+python3 SKILL_DIR/scripts/xmtp_client.py ~/.bot-matcher health
 # Should show: status "connected", your wallet address, env "dev"
 ```
 
@@ -202,16 +227,16 @@ python3 {baseDir}/scripts/xmtp_client.py health
 #### Step 1: Privacy Tiering
 
 Read `memory/MEMORY.md`. Then read the appropriate prompt:
-- Chinese memory: `{baseDir}/references/prompt1_zh.md`
-- English memory: `{baseDir}/references/prompt1_en.md`
+- Chinese memory: `SKILL_DIR/references/prompt1_zh.md`
+- English memory: `SKILL_DIR/references/prompt1_en.md`
 
 Follow the prompt exactly. Write output to `~/.bot-matcher/tiered_memory.md`.
 
 #### Step 2: Profile Extraction
 
 Read the appropriate prompt:
-- Chinese: `{baseDir}/references/prompt2_zh.md`
-- English: `{baseDir}/references/prompt2_en.md`
+- Chinese: `SKILL_DIR/references/prompt2_zh.md`
+- English: `SKILL_DIR/references/prompt2_en.md`
 
 Produce:
 1. **Profile A** (L1 only) → `~/.bot-matcher/profile_public.md`
@@ -228,7 +253,7 @@ When the user says "add <claw_name>" or "add agent #<id>":
 ### 2.1 Resolve the peer
 
 ```bash
-python3 {baseDir}/scripts/chain/resolve.py <agent_id> --network sepolia
+python3 SKILL_DIR/scripts/chain/resolve.py <agent_id> --network sepolia
 ```
 
 This returns the peer's name, **wallet address** (for XMTP), and registration info.
@@ -239,7 +264,7 @@ This returns the peer's name, **wallet address** (for XMTP), and registration in
 
 ```bash
 # Step 1: Send card (Profile A) via XMTP
-python3 {baseDir}/scripts/send_card.py ~/.bot-matcher <peer_wallet_address> --agent-id <peer_agent_id>
+python3 SKILL_DIR/scripts/send_card.py ~/.bot-matcher <peer_wallet_address> --agent-id <peer_agent_id>
 ```
 
 This sends a ClawMatch "card" message containing your Profile A via XMTP.
@@ -275,7 +300,7 @@ After exchanging profiles:
 When B says "accept <peer_id>" or "reveal that tree":
 
 ```bash
-python3 {baseDir}/scripts/local_query.py ~/.bot-matcher accept <peer_id>
+python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher accept <peer_id>
 ```
 
 This:
@@ -292,7 +317,7 @@ This:
 **ALWAYS use `check_inbox.py`**, never manually `ls`:
 
 ```bash
-python3 {baseDir}/scripts/check_inbox.py ~/.bot-matcher
+python3 SKILL_DIR/scripts/check_inbox.py ~/.bot-matcher
 ```
 
 This first **pulls new messages from XMTP** (via the bridge), then scans local files.
@@ -329,7 +354,7 @@ After match evaluation, generate the handshake:
 4. Set visibility: `sideA: "revealed"`, `sideB: "shadow"`
 5. Write to `~/.bot-matcher/handshakes/{peer_id}.json`
 
-Refer to `{baseDir}/references/schemas.md` Section 10 for the JSON schema.
+Refer to `SKILL_DIR/references/schemas.md` Section 10 for the JSON schema.
 
 ---
 
@@ -339,7 +364,7 @@ Two claws converse as matchmakers (媒人) investigating compatibility.
 
 ### Before first turn
 
-1. Read `{baseDir}/references/conversation_prompt.md`
+1. Read `SKILL_DIR/references/conversation_prompt.md`
 2. Read `~/.bot-matcher/matches/{peer_id}.md`
 3. Initialize `~/.bot-matcher/criteria/{peer_id}.json`
 
@@ -360,7 +385,7 @@ Two claws converse as matchmakers (媒人) investigating compatibility.
 
 **Step 5: Send and update**
 ```bash
-python3 {baseDir}/scripts/send_message.py ~/.bot-matcher <peer_wallet_address> "<message>"
+python3 SKILL_DIR/scripts/send_message.py ~/.bot-matcher <peer_wallet_address> "<message>"
 ```
 
 Append to conversation log. Update criteria tracking.
@@ -401,12 +426,12 @@ When the user says "water my tree with <peer_id> about <topic>":
 
 4. Use `water_tree.py` which handles sending + handshake update in one step:
 ```bash
-python3 {baseDir}/scripts/water_tree.py ~/.bot-matcher <peer_id> "<topic>" "<message>"
+python3 SKILL_DIR/scripts/water_tree.py ~/.bot-matcher <peer_id> "<topic>" "<message>"
 ```
 
    Or manually with `send_message.py`:
 ```bash
-python3 {baseDir}/scripts/send_message.py ~/.bot-matcher <peer_wallet_address> "<message>" --type water --topic "<topic>"
+python3 SKILL_DIR/scripts/send_message.py ~/.bot-matcher <peer_wallet_address> "<message>" --type water --topic "<topic>"
 ```
 
 5. `water_tree.py` automatically:
@@ -432,7 +457,7 @@ Every time the user interacts with the claw, check all trees:
 ### 7.1 Check tree health
 
 ```bash
-python3 {baseDir}/scripts/check_trees.py ~/.bot-matcher
+python3 SKILL_DIR/scripts/check_trees.py ~/.bot-matcher
 ```
 
 For each handshake where `visibility.sideB == "revealed"`:
@@ -459,14 +484,14 @@ Use `local_query.py` to inspect local data:
 
 | Action | Command |
 |--------|---------|
-| Overall status | `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher status` |
-| View forest (all trees) | `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher forest` |
-| View handshake | `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher handshake <peer_id>` |
-| View connections | `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher connections` |
-| View peers | `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher peers` |
-| View messages | `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher messages <peer_id>` |
-| Accept connection | `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher accept <peer_id>` |
-| Bridge health | `python3 {baseDir}/scripts/xmtp_client.py health` |
+| Overall status | `python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher status` |
+| View forest (all trees) | `python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher forest` |
+| View handshake | `python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher handshake <peer_id>` |
+| View connections | `python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher connections` |
+| View peers | `python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher peers` |
+| View messages | `python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher messages <peer_id>` |
+| Accept connection | `python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher accept <peer_id>` |
+| Bridge health | `python3 SKILL_DIR/scripts/xmtp_client.py ~/.bot-matcher health` |
 | Bridge logs | `tail -20 ~/.bot-matcher/bridge.log` |
 
 ---
@@ -501,8 +526,8 @@ node --version
 cat ~/.bot-matcher/bridge.log
 
 # Force kill and restart
-python3 {baseDir}/scripts/start_bridge.py ~/.bot-matcher --stop
-python3 {baseDir}/scripts/start_bridge.py ~/.bot-matcher
+python3 SKILL_DIR/scripts/start_bridge.py ~/.bot-matcher --stop
+python3 SKILL_DIR/scripts/start_bridge.py ~/.bot-matcher
 ```
 
 ### "Address not reachable on XMTP"
@@ -516,7 +541,7 @@ Both sides must have their bridge running for communication to work.
 
 ### Sepolia RPC unreachable
 
-The default public RPC can go down. Edit `{baseDir}/scripts/chain/abi.py` and
+The default public RPC can go down. Edit `SKILL_DIR/scripts/chain/abi.py` and
 change the RPC URL:
 
 ```python
@@ -541,14 +566,14 @@ pip install web3
 ### npm dependencies fail to install
 
 ```bash
-cd {baseDir}/scripts/xmtp
+cd SKILL_DIR/scripts/xmtp
 rm -rf node_modules package-lock.json
 npm install --production
 ```
 
 ### Bridge running but messages not arriving
 
-1. Check bridge health: `python3 {baseDir}/scripts/local_query.py ~/.bot-matcher status`
-2. Check inbox: `python3 {baseDir}/scripts/check_inbox.py ~/.bot-matcher`
+1. Check bridge health: `python3 SKILL_DIR/scripts/local_query.py ~/.bot-matcher status`
+2. Check inbox: `python3 SKILL_DIR/scripts/check_inbox.py ~/.bot-matcher`
 3. Verify the peer's wallet can receive XMTP:
-   `python3 {baseDir}/scripts/xmtp_client.py ~/.bot-matcher can-message <peer_wallet>`
+   `python3 SKILL_DIR/scripts/xmtp_client.py ~/.bot-matcher can-message <peer_wallet>`
