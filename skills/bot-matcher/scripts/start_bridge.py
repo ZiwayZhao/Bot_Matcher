@@ -285,14 +285,18 @@ def start_bridge_docker(
     )
 
     # 6. Run container
+    #    --dns 8.8.8.8: ensure DNS works even if host resolv.conf is odd
+    #    NODE_OPTIONS=--use-openssl-ca: use system CA certs for gRPC/TLS
     print(f"[Bridge] Starting Docker container on port {port}...")
     run_result = subprocess.run(
         [
             docker_path, "run", "-d",
             "--name", container_name,
+            "--dns", "8.8.8.8",
             "-e", f"XMTP_PRIVATE_KEY={private_key}",
             "-e", f"XMTP_ENV={env}",
             "-e", "BRIDGE_PORT=3500",
+            "-e", "NODE_OPTIONS=--use-openssl-ca",
             "-p", f"127.0.0.1:{port}:3500",
             "--restart", "unless-stopped",
             image_name,

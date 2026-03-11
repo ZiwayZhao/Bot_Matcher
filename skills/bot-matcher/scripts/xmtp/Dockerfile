@@ -1,5 +1,9 @@
 FROM node:22-slim
 
+# XMTP SDK uses gRPC over TLS — need CA certificates in slim image
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /bridge
 
 COPY package.json ./
