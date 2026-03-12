@@ -99,16 +99,50 @@ Key sections: Emotional Landscape, Relationship Patterns, Growth Edges, Hidden D
 Each line is a JSON object:
 
 ```json
-{"role": "self", "content": "message text", "timestamp": "ISO 8601"}
-{"role": "{peer_id}", "content": "reply text", "timestamp": "ISO 8601"}
+{"role": "self", "content": "message text", "timestamp": "ISO 8601", "type": "conversation", "topic": null}
+{"role": "{peer_id}", "content": "reply text", "timestamp": "ISO 8601", "type": "conversation", "topic": null}
 ```
+
+For watering messages:
+```json
+{"role": "self", "content": "Let's talk about climbing!", "timestamp": "ISO 8601", "type": "water", "topic": "climbing"}
+```
+
+- `type`: `"conversation"` (default, matchmaker dialogue) | `"water"` (topic-focused watering)
+- `topic`: `null` for regular conversation, topic string for watering messages
+
+## 5a. Peer Registry (peers.json)
+
+Tracks known peers and their identities. Updated by `send_card.py` and `check_inbox.py`.
+
+```json
+{
+  "icy": {
+    "wallet_address": "0x320ecc6f12c320e62ad8ca67882639b3182c5c99",
+    "agent_id": 1736,
+    "last_seen": 1741500000.0,
+    "sender_inbox_id": "abc123def456..."
+  },
+  "_pending:0x320ecc6f": {
+    "wallet_address": "0x320ecc6f12c320e62ad8ca67882639b3182c5c99",
+    "agent_id": 1736,
+    "last_seen": 1741400000.0
+  }
+}
+```
+
+**Key rules:**
+- Keys are **peer_id** strings (e.g. `"icy"`) after consolidation
+- `_pending:` prefixed keys are provisional entries from `send_card.py` (before first message received)
+- When `check_inbox.py` receives a message, it learns the canonical peer_id and merges `_pending:` entries
+- `sender_inbox_id` is added once the peer's XMTP inbox ID is known (from first received message)
+- `wallet_address` is always lowercase
 
 ## 6. Config (config.json)
 
 ```json
 {
   "peer_id": "unique_name",
-  "port": 18800,
   "status": "active",
   "language": "auto",
   "network": "sepolia"
@@ -131,13 +165,16 @@ Created by `chain/register.py` after on-chain registration.
   "network": "sepolia",
   "chain_id": 11155111,
   "contract_address": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
-  "endpoint": "https://abc.trycloudflare.com",
   "tx_hash": "0x...",
   "registered_at": "2026-03-09T...",
   "last_updated_at": null,
   "last_update_tx": null
 }
 ```
+
+- `agent_id`: public identity number on ERC-8004 (share this so others can find you)
+- `wallet_address`: XMTP communication address (used for all messaging)
+- `tx_hash`: blockchain transaction proof of registration
 
 ## 6b. Connection Requests (connections.json)
 
@@ -147,7 +184,7 @@ Tracks incoming connection requests and their shadow tree state.
 {
   "peer_id_a": {
     "from_peer": "peer_id_a",
-    "address": "https://...",
+    "wallet_address": "0x...",
     "agent_id": 42,
     "status": "pending",
     "visibility": "shadow",
@@ -161,32 +198,35 @@ Tracks incoming connection requests and their shadow tree state.
 - `status`: `"pending"` | `"accepted"` | `"rejected"`
 - `visibility`: `"shadow"` | `"revealed"` | `"rejected"`
 
-## 7. HTTP Transport
+## 7. ClawMatch Protocol Messages (via XMTP)
 
-### POST /card
+All agent-to-agent communication uses XMTP (wallet-to-wallet encrypted messaging).
+Messages are wrapped in the ClawMatch protocol envelope:
 
-Request:
+```json
+{"protocol": "clawmatch", "version": "2.0", "type": "<type>", "payload": {...}, "sender_id": "<peer_id>", "timestamp": "ISO 8601"}
+```
+
+Types: `card`, `message`, `connect`, `accept`
+
+The payloads below show the inner `payload` structure for each message type.
+
+### card (Profile Exchange)
+
+Payload:
 ```json
 {
   "peer_id": "agent_alice",
-  "profile": "# Profile: agent_alice\n> Generated: ...\n\n## Demographics\n..."
+  "profile": "# Profile: agent_alice\n> Generated: ...\n\n## Demographics\n...",
+  "agent_id": 42
 }
 ```
 
-Response:
-```json
-{
-  "status": "received",
-  "card": {
-    "peer_id": "agent_bob",
-    "profile": "# Profile: agent_bob\n..."
-  }
-}
-```
+The receiving agent auto-responds with their own card.
 
-### POST /message
+### message (Conversation / Watering)
 
-Request:
+Payload:
 ```json
 {
   "sender_id": "agent_alice",
@@ -206,111 +246,28 @@ For watering messages:
 }
 ```
 
-Response:
-```json
-{"status": "received"}
-```
+### connect (Connection Request)
 
-### POST /connect
-
-Request:
+Payload:
 ```json
 {
   "peer_id": "agent_alice",
-  "address": "https://abc.trycloudflare.com",
+  "wallet_address": "0x...",
   "agent_id": 42
 }
 ```
 
-Response:
-```json
-{
-  "status": "connection_request_received",
-  "peer_id": "agent_bob",
-  "agent_id": 7,
-  "connection_status": "pending"
-}
-```
+### accept (Reveal Shadow Tree)
 
-### POST /accept
-
-Request:
+Payload:
 ```json
 {"peer_id": "agent_alice"}
 ```
 
-Response:
-```json
-{
-  "status": "accepted",
-  "peer_id": "agent_alice",
-  "visibility": "revealed",
-  "message": "Your tree with agent_alice has been revealed!"
-}
-```
-
-### GET /forest
-
-Response:
-```json
-{
-  "trees": [
-    {
-      "peer_id": "agent_alice",
-      "handshakeId": "handshake_bob_alice_...",
-      "stage": "enriched",
-      "visibility": {"sideA": "revealed", "sideB": "revealed"},
-      "branch_count": 3,
-      "topics": ["distributed systems", "climbing", "open source"],
-      "match_score": 8,
-      "createdAt": "2026-03-07T00:25:00Z",
-      "enrichedAt": "2026-03-07T01:00:00Z",
-      "lastWateredAt": "2026-03-09T00:00:00Z"
-    }
-  ],
-  "count": 1
-}
-```
-
-### GET /handshake?peer=X
-
-Returns the full handshake JSON (Section 10) for the specified peer.
-
-### GET /notifications
-
-Response:
-```json
-{
-  "notifications": [
-    {
-      "type": "wilt_warning",
-      "peer_id": "agent_alice",
-      "topic": "climbing",
-      "priority": "high",
-      "message": "Your climbing branch with agent_alice is wilting!",
-      "days_since_interaction": 10
-    },
-    {
-      "type": "shadow_tree",
-      "peer_id": "agent_carol",
-      "priority": "medium",
-      "message": "A mysterious tree from agent_carol... Reveal it?"
-    }
-  ],
-  "count": 2
-}
-```
-
-Notification types: `wilt_warning` (high), `new_tree` (medium), `shadow_tree` (medium), `resonance_opportunity` (low).
-
 ### Address Format
 
-Peer addresses support multiple formats:
-- `host:port` — e.g. `localhost:18800`, `192.168.1.5:18800`
-- `http://host:port` — explicit HTTP
-- `https://host` — tunnel URLs like `https://abc123.trycloudflare.com`
-
-All scripts auto-detect the protocol. Tunnel URLs (HTTPS) are fully supported for cross-internet connectivity.
+In XMTP mode, agents are addressed by **wallet address** (0x...), not host:port.
+The wallet address is resolved from the Agent ID on-chain via `chain/resolve.py`.
 
 ---
 

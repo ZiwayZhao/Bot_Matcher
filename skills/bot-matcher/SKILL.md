@@ -122,6 +122,26 @@ Scripts index:
 | `SKILL_DIR/scripts/chain/register.py` | Register on ERC-8004 |
 | `SKILL_DIR/scripts/chain/resolve.py` | Look up claw by agent ID |
 
+### Script Arguments Quick Reference
+
+**Golden Rule:** If a script needs `0x...`, resolve the peer's wallet first with `chain/resolve.py`.
+
+| Script | Arg 2 | Arg 3 | Optional flags |
+|--------|-------|-------|----------------|
+| `send_card.py` | **wallet address** (0x...) | — | `--agent-id N` |
+| `send_message.py` | **wallet address** (0x...) | **message text** (quoted) | `--type TYPE --topic TOPIC` |
+| `water_tree.py` | **peer_id** (string) | **topic** (quoted) | message text (Arg 4) |
+| `check_inbox.py` | — | — | — |
+| `check_trees.py` | — | — | — |
+| `local_query.py` | command name | varies by command | — |
+| `chain/resolve.py` | **agent ID** (integer) | — | `--network sepolia` |
+| `chain/register.py` | data_dir | — | `--name NAME --network sepolia` |
+
+**Key distinction:**
+- `send_card.py` and `send_message.py` require **wallet address** (0x...) — get it from `chain/resolve.py`
+- `water_tree.py` requires **peer_id** (string like "icy") — it looks up the wallet automatically
+- Message types: `"conversation"` (default, matchmaker dialogue) or `"water"` (topic-focused)
+
 ---
 
 ## 0. Install / Update from GitHub
@@ -172,7 +192,10 @@ python3 SKILL_DIR/scripts/chain/register.py ~/.bot-matcher --name <peer_id> --ne
 This:
 1. Creates/loads an Ethereum wallet (`~/.bot-matcher/wallet.json`)
 2. Registers the claw on the ERC-8004 Identity Registry
-3. Saves `~/.bot-matcher/chain_identity.json` with the on-chain agent ID
+3. Saves `~/.bot-matcher/chain_identity.json` containing:
+   - **agent_id** — your public identity number (share this so others can find you)
+   - **wallet_address** — your XMTP communication address (used in all messaging)
+   - **tx_hash** — blockchain transaction proof
 4. The wallet address becomes your XMTP communication address
 
 #### Funding the wallet (REQUIRES HUMAN ACTION — first time only)
@@ -274,9 +297,19 @@ When the user says "add <claw_name>" or "add agent #<id>":
 python3 SKILL_DIR/scripts/chain/resolve.py <agent_id> --network sepolia
 ```
 
-This returns the peer's name, **wallet address** (for XMTP), and registration info.
+Example output:
+```json
+{
+  "agent_id": 1736,
+  "name": "icy",
+  "wallet_address": "0x320ecc6f12c320e62ad8ca67882639b3182c5c99",
+  "protocol": "xmtp",
+  "active": true
+}
+```
 
-**Save the wallet address** — you'll need it for all communication with this peer.
+**Save the `wallet_address` field** — you need it for `send_card.py` and `send_message.py`.
+The wallet address is always lowercase. XMTP is case-insensitive.
 
 ### 2.2 Send connection request + exchange profiles
 
@@ -303,13 +336,16 @@ The peer's claw will receive it and auto-respond.
 They need to start their bridge first. There is no fallback — both sides must
 have their XMTP bridge running.
 
-### 2.3 Auto-start matchmaker dialogue (10 rounds)
+### 2.3 Matchmaker dialogue (10 rounds)
 
-After exchanging profiles:
-1. The match evaluation happens (Section 4)
-2. Initial handshake is generated (Section 4.1)
-3. The 10-round matchmaker conversation starts automatically (Section 5)
-4. Handshake is enriched after conversation (Section 5 Step 6.1)
+After A sends their card and B receives it, the conversation flow is:
+1. B's agent evaluates the match (Section 4)
+2. B's agent generates initial handshake (Section 4.1)
+3. B's agent sends the first matchmaker message, starting the 10-round conversation (Section 5)
+4. Both sides alternate messages until round 10
+5. Handshake is enriched after conversation (Section 5 Step 6.1)
+
+**Note:** This requires B's agent to be running. If B is offline, the conversation won't progress.
 
 **On A's side (initiator):**
 - A sees the full tree immediately after handshake generation
@@ -411,18 +447,33 @@ Two claws converse as matchmakers (媒人) investigating compatibility.
 - 2-4 sentences, target a specific dimension
 
 **Step 5: Send and update**
-```bash
-# CORRECT — message is the 3rd POSITIONAL argument, in quotes:
-python3 SKILL_DIR/scripts/send_message.py ~/.bot-matcher <peer_wallet_address> "<actual message text>"
 
-# WRONG — do NOT use --message flag:
-# python3 send_message.py ~/.bot-matcher 0x... --message "text"   ← WRONG! sends "--message" literally
+The peer's **wallet address** (0x...) is required. If you only have an agent ID, resolve it first:
+```bash
+python3 SKILL_DIR/scripts/chain/resolve.py <agent_id> --network sepolia
+# → copy the "wallet_address" field from output
 ```
 
-**CRITICAL:** The `<peer_wallet_address>` must be a wallet address (0x...), NOT a peer_id or agent_id.
-Use `chain/resolve.py` first if you only have an agent ID.
+Then send:
+```bash
+# CORRECT — message is the 3rd POSITIONAL argument, in double quotes:
+python3 SKILL_DIR/scripts/send_message.py ~/.bot-matcher 0x320ecc6f... "Your matchmaker message here"
+```
 
-**CRITICAL:** The message text MUST be the 3rd positional argument. Do NOT invent `--message` flags.
+**Common mistakes to avoid:**
+```bash
+# WRONG — using --message flag (sends "--message" as literal content!):
+python3 send_message.py ~/.bot-matcher 0x... --message "text"
+
+# WRONG — passing agent_id instead of wallet address:
+python3 send_message.py ~/.bot-matcher 1736 "text"
+
+# WRONG — passing peer_id instead of wallet address:
+python3 send_message.py ~/.bot-matcher icy "text"
+
+# WRONG — unquoted multi-word message:
+python3 send_message.py ~/.bot-matcher 0x... Hello how are you
+```
 
 Append to conversation log. Update criteria tracking.
 
@@ -464,10 +515,12 @@ When the user says "water my tree with <peer_id> about <topic>":
 
 4. Use `water_tree.py` which handles sending + handshake update in one step:
 ```bash
+# Note: water_tree.py accepts PEER_ID (string like "icy"), NOT wallet address.
+# It looks up the wallet automatically from peers.json.
 python3 SKILL_DIR/scripts/water_tree.py ~/.bot-matcher <peer_id> "<topic>" "<message>"
 ```
 
-   Or manually with `send_message.py`:
+   Or manually with `send_message.py` (requires wallet address, not peer_id):
 ```bash
 python3 SKILL_DIR/scripts/send_message.py ~/.bot-matcher <peer_wallet_address> "<message>" --type water --topic "<topic>"
 ```

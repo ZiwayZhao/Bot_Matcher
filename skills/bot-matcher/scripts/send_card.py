@@ -16,6 +16,7 @@ Output (stdout): JSON with send result.
 
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -98,7 +99,7 @@ def main():
         peers[peer_id_for_save] = {
             "wallet_address": peer_wallet.lower(),
             "agent_id": peer_agent_id,
-            "last_seen": __import__("time").time(),
+            "last_seen": time.time(),
         }
         peers_path.write_text(json.dumps(peers, indent=2, ensure_ascii=False), encoding="utf-8")
 
