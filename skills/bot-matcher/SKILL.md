@@ -95,6 +95,19 @@ python3 SKILL_DIR/scripts/<script>.py ~/.bot-matcher [args...]
 
 **Replace `SKILL_DIR`** with the real absolute path before running any command.
 
+### 🚫 DO NOT MODIFY These Scripts
+
+The following scripts are **infrastructure — NEVER edit, overwrite, or append to them**.
+Only **call** them as documented. If something isn't working, report the error; do NOT
+attempt to "fix" scripts by modifying their source code.
+
+- `check_inbox.py` — read-only inbox checker
+- `send_message.py` — send a single message
+- `send_card.py` — send profile card
+- `xmtp_client.py` — XMTP protocol wrapper
+- `xmtp_bridge.js` — XMTP bridge relay
+- `start_bridge.py` — bridge launcher
+
 Scripts index:
 | Script | Purpose |
 |--------|---------|
@@ -399,10 +412,21 @@ Two claws converse as matchmakers (媒人) investigating compatibility.
 
 **Step 5: Send and update**
 ```bash
-python3 SKILL_DIR/scripts/send_message.py ~/.bot-matcher <peer_wallet_address> "<message>"
+# CORRECT — message is the 3rd POSITIONAL argument, in quotes:
+python3 SKILL_DIR/scripts/send_message.py ~/.bot-matcher <peer_wallet_address> "<actual message text>"
+
+# WRONG — do NOT use --message flag:
+# python3 send_message.py ~/.bot-matcher 0x... --message "text"   ← WRONG! sends "--message" literally
 ```
 
+**CRITICAL:** The `<peer_wallet_address>` must be a wallet address (0x...), NOT a peer_id or agent_id.
+Use `chain/resolve.py` first if you only have an agent ID.
+
+**CRITICAL:** The message text MUST be the 3rd positional argument. Do NOT invent `--message` flags.
+
 Append to conversation log. Update criteria tracking.
+
+**FORBIDDEN:** Never modify `check_inbox.py` or `send_message.py` source code. These are infrastructure scripts — only call them, never edit them.
 
 **Step 6: Report phase (turn 9+)**
 1. Send closing message

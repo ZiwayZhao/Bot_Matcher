@@ -177,6 +177,69 @@ class TestBug4_SendCardUsage:
         )
 
 
+class TestBug5_SendMessageFlag:
+    """Bug #5: send_message.py must handle --message flag defensively.
+
+    LLMs sometimes call:  send_message.py <dir> <wallet> --message "text"
+    instead of:           send_message.py <dir> <wallet> "text"
+    This sends "--message" as the literal content instead of the actual message.
+    """
+
+    def test_send_message_accepts_message_flag(self):
+        """send_message.py should parse --message flag and recover actual text."""
+        content = SCRIPTS_DIR / "send_message.py"
+        src = content.read_text(encoding="utf-8")
+        assert '--message' in src and 'message_text = args[i + 1]' in src, \
+            "send_message.py must handle --message flag as fallback"
+
+    def test_send_message_rejects_flag_as_content(self):
+        """send_message.py should error if message_text still looks like a flag."""
+        content = SCRIPTS_DIR / "send_message.py"
+        src = content.read_text(encoding="utf-8")
+        assert 'message_text.startswith("--")' in src, \
+            "send_message.py must detect and reject flag-like message content"
+
+    def test_skill_md_send_message_warning(self):
+        """SKILL.md must warn against using --message flag."""
+        skill_md = SCRIPTS_DIR.parent / "SKILL.md"
+        text = skill_md.read_text(encoding="utf-8")
+        assert "WRONG" in text and "--message" in text, \
+            "SKILL.md must explicitly show --message flag as WRONG usage"
+
+
+class TestBug6_ScriptProtection:
+    """Bug #6: Infrastructure scripts must not be modified by the agent.
+
+    nanobot's LLM modified check_inbox.py by appending duplicate code blocks
+    (20x copy-paste), corrupting the file and causing infinite loops.
+    SKILL.md must explicitly forbid editing infrastructure scripts.
+    """
+
+    def test_check_inbox_no_subprocess_spam(self):
+        """check_inbox.py must not contain repeated subprocess.run blocks."""
+        content = (SCRIPTS_DIR / "check_inbox.py").read_text(encoding="utf-8")
+        import re
+        matches = re.findall(r'subprocess\.run\(', content)
+        assert len(matches) <= 1, \
+            f"check_inbox.py has {len(matches)} subprocess.run() calls — likely corrupted by LLM"
+
+    def test_check_inbox_reasonable_length(self):
+        """check_inbox.py should not exceed 300 lines (corruption indicator)."""
+        content = (SCRIPTS_DIR / "check_inbox.py").read_text(encoding="utf-8")
+        lines = content.count('\n')
+        assert lines <= 300, \
+            f"check_inbox.py has {lines} lines — likely corrupted (expected <300)"
+
+    def test_skill_md_forbids_script_modification(self):
+        """SKILL.md must explicitly forbid modifying infrastructure scripts."""
+        skill_md = SCRIPTS_DIR.parent / "SKILL.md"
+        text = skill_md.read_text(encoding="utf-8")
+        assert "NEVER edit" in text or "DO NOT MODIFY" in text, \
+            "SKILL.md must forbid modification of infrastructure scripts"
+        assert "check_inbox.py" in text, \
+            "SKILL.md must specifically mention check_inbox.py as protected"
+
+
 def run_tests():
     """Run all tests and report results."""
     import traceback
@@ -186,6 +249,8 @@ def run_tests():
         TestBug2_PersistentDbKey,
         TestBug3_ChainQueryAlias,
         TestBug4_SendCardUsage,
+        TestBug5_SendMessageFlag,
+        TestBug6_ScriptProtection,
     ]
 
     total = 0

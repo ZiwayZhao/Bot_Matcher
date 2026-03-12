@@ -41,8 +41,22 @@ def main():
         elif args[i] == "--topic" and i + 1 < len(args):
             topic = args[i + 1]
             i += 2
+        elif args[i] == "--message" and i + 1 < len(args):
+            # Defensive: LLMs sometimes call with --message flag instead of positional arg.
+            # If argv[3] looks like a flag, the real message is here.
+            message_text = args[i + 1]
+            i += 2
         else:
             i += 1
+
+    # Defensive: if message_text looks like a CLI flag, it was likely a mis-invocation.
+    if message_text.startswith("--"):
+        print(json.dumps({
+            "error": f"Message text looks like a CLI flag: '{message_text}'. "
+                     f"Usage: send_message.py <data_dir> <wallet> \"<actual message text>\" "
+                     f"— the message must be the 3rd positional argument, NOT a --flag."
+        }))
+        sys.exit(1)
 
     # Check bridge
     if not is_bridge_running():
