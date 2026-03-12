@@ -19,6 +19,42 @@ sys.path.insert(0, str(Path(__file__).parent))
 from xmtp_client import configure, send_xmtp, build_clawmatch_message, is_bridge_running
 
 
+def _resolve_peer_id(data_dir: Path, wallet: str) -> str:
+    """Resolve wallet address to peer_id from peers.json.
+
+    Falls back to wallet[:10] if no mapping found.
+    """
+    peers_path = data_dir / "peers.json"
+    if peers_path.exists():
+        try:
+            peers = json.loads(peers_path.read_text(encoding="utf-8"))
+            wallet_lower = wallet.lower()
+            for pid, info in peers.items():
+                if info.get("wallet_address", "").lower() == wallet_lower:
+                    return pid
+        except (json.JSONDecodeError, OSError):
+            pass
+    return wallet[:10]
+
+
+def _save_wallet_mapping(data_dir: Path, peer_id: str, wallet: str):
+    """Ensure peer_id → wallet_address mapping exists in peers.json."""
+    peers_path = data_dir / "peers.json"
+    peers = {}
+    if peers_path.exists():
+        try:
+            peers = json.loads(peers_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    entry = peers.get(peer_id, {})
+    if not entry.get("wallet_address"):
+        entry["wallet_address"] = wallet
+        import time
+        entry["last_seen"] = time.time()
+        peers[peer_id] = entry
+        peers_path.write_text(json.dumps(peers, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def main():
     if len(sys.argv) < 4:
         print(f"Usage: {sys.argv[0]} <data_dir> <peer_wallet_address> <message> [--type TYPE] [--topic TOPIC]")
@@ -83,6 +119,27 @@ def main():
     # Send via XMTP
     try:
         result = send_xmtp(peer_wallet, message)
+
+        # --- Bug #7 fix: record sent message to local messages log ---
+        peer_id = _resolve_peer_id(data_dir, peer_wallet)
+        msg_dir = data_dir / "messages"
+        msg_dir.mkdir(parents=True, exist_ok=True)
+        msg_file = msg_dir / f"{peer_id}.jsonl"
+        from datetime import datetime, timezone
+        entry = {
+            "role": own_peer_id,
+            "content": message_text,
+            "type": msg_type,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if topic:
+            entry["topic"] = topic
+        with open(msg_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # Also ensure wallet → peer_id mapping exists in peers.json
+        _save_wallet_mapping(data_dir, peer_id, peer_wallet)
+
         print(json.dumps({
             "status": "sent",
             "to_wallet": peer_wallet,

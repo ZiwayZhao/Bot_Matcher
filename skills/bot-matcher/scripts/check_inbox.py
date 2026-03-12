@@ -134,8 +134,11 @@ def pull_xmtp_messages(data_dir: Path) -> int:
     return processed
 
 
-def _save_peer_info(data_dir: Path, peer_id: str, payload: dict):
-    """Save peer info (wallet_address, agent_id) to peers.json."""
+def _save_peer_info(data_dir: Path, peer_id: str, payload: dict, wallet_address: str = None):
+    """Save peer info (wallet_address, agent_id) to peers.json.
+
+    Bug #9 fix: consistently store wallet_address for peer_id ↔ wallet mapping.
+    """
     peers_path = data_dir / "peers.json"
     peers = {}
     if peers_path.exists():
@@ -146,14 +149,45 @@ def _save_peer_info(data_dir: Path, peer_id: str, payload: dict):
 
     import time
     peer_entry = peers.get(peer_id, {})
-    if payload.get("wallet_address"):
-        peer_entry["wallet_address"] = payload["wallet_address"]
+    # Accept wallet from payload OR explicit parameter
+    w = wallet_address or payload.get("wallet_address")
+    if w:
+        peer_entry["wallet_address"] = w
     if payload.get("agent_id") is not None:
         peer_entry["agent_id"] = payload["agent_id"]
     peer_entry["last_seen"] = time.time()
     peers[peer_id] = peer_entry
 
     peers_path.write_text(json.dumps(peers, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def resolve_wallet_for_peer(data_dir: Path, peer_id: str) -> str | None:
+    """Look up wallet_address for a peer_id from peers.json."""
+    peers_path = data_dir / "peers.json"
+    if peers_path.exists():
+        try:
+            peers = json.loads(peers_path.read_text(encoding="utf-8"))
+            return peers.get(peer_id, {}).get("wallet_address")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _load_read_cursors(data_dir: Path) -> dict:
+    """Load read cursors from read_cursors.json."""
+    cursor_path = data_dir / "read_cursors.json"
+    if cursor_path.exists():
+        try:
+            return json.loads(cursor_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_read_cursors(data_dir: Path, cursors: dict):
+    """Save read cursors to read_cursors.json."""
+    cursor_path = data_dir / "read_cursors.json"
+    cursor_path.write_text(json.dumps(cursors, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def main():
@@ -163,11 +197,17 @@ def main():
 
     data_dir = Path(sys.argv[1]).expanduser()
     configure(data_dir)
+
+    # Bug #10 fix: ensure all required directories exist on first run
     inbox_dir = data_dir / "inbox"
     matches_dir = data_dir / "matches"
     messages_dir = data_dir / "messages"
     conversations_dir = data_dir / "conversations"
+    criteria_dir = data_dir / "criteria"
+    handshakes_dir = data_dir / "handshakes"
     connections_file = data_dir / "connections.json"
+    for d in [inbox_dir, matches_dir, messages_dir, conversations_dir, criteria_dir, handshakes_dir]:
+        d.mkdir(parents=True, exist_ok=True)
 
     # --- 0. Pull new messages from XMTP ---
     xmtp_pulled = pull_xmtp_messages(data_dir)
@@ -187,42 +227,39 @@ def main():
                     "preview": preview,
                 })
 
-    # --- 2. New messages (received but not yet in conversation log) ---
+    # --- 2. New messages (using read cursor to track unread) ---
+    cursors = _load_read_cursors(data_dir)
     new_messages = []
     if messages_dir.exists():
         for msg_file in sorted(messages_dir.glob("*.jsonl")):
             peer_id = msg_file.stem
-            conv_file = conversations_dir / f"{peer_id}.jsonl"
+            all_lines = msg_file.read_text(encoding="utf-8").strip().split("\n")
+            all_lines = [line for line in all_lines if line.strip()]
+            total_count = len(all_lines)
 
-            incoming_lines = msg_file.read_text(encoding="utf-8").strip().split("\n")
-            incoming_count = len([line for line in incoming_lines if line.strip()])
-
-            processed_count = 0
-            if conv_file.exists():
-                conv_lines = conv_file.read_text(encoding="utf-8").strip().split("\n")
-                for line in conv_lines:
-                    if line.strip():
-                        try:
-                            entry = json.loads(line)
-                            if entry.get("role") == peer_id:
-                                processed_count += 1
-                        except json.JSONDecodeError:
-                            pass
-
-            unread = incoming_count - processed_count
+            # Read cursor: how many lines we've already "seen"
+            cursor = cursors.get(peer_id, 0)
+            unread = total_count - cursor
             if unread > 0:
                 latest = []
-                for line in incoming_lines[processed_count:]:
-                    if line.strip():
-                        try:
-                            latest.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
+                for line in all_lines[cursor:]:
+                    try:
+                        latest.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
                 new_messages.append({
                     "peer_id": peer_id,
                     "unread_count": unread,
                     "latest": latest[-3:],
                 })
+
+    # Auto-advance cursors after reading (mark as read)
+    if new_messages:
+        for msg_file in messages_dir.glob("*.jsonl"):
+            peer_id = msg_file.stem
+            all_lines = msg_file.read_text(encoding="utf-8").strip().split("\n")
+            cursors[peer_id] = len([l for l in all_lines if l.strip()])
+        _save_read_cursors(data_dir, cursors)
 
     # --- 3. Pending connection requests ---
     pending_connections = []

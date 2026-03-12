@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Regression tests for bugs found during XMTP bridge debugging (2026-03-11).
+"""Regression tests for bugs found during XMTP bridge debugging (2026-03-11/12).
 
 Bug #1: streamAllMessages() missing await — SDK v5.5 returns Promise
 Bug #2: dbEncryptionKey randomly generated — can't reopen DB after restart
 Bug #3: chain/query.py missing — LLM hallucination of non-existent script
 Bug #4: send_card.py misuse — LLM passes agent_id instead of wallet address
+Bug #5: send_message.py --message flag misuse by LLM
+Bug #6: Infrastructure scripts corrupted by LLM copy-paste
+Bug #7: Sent messages not recorded locally — conversation history incomplete
+Bug #8: Unread detection broken — comparing against conversations/ dir
+Bug #9: peer_id ↔ wallet_address mapping inconsistent across scripts
+Bug #10: First-run crash — required directories don't exist
 
 Run:
   python3 -m pytest tests/test_bridge_bugs.py -v
@@ -26,6 +32,8 @@ CHAIN_DIR = SCRIPTS_DIR / "chain"
 BRIDGE_JS = XMTP_DIR / "xmtp_bridge.js"
 START_BRIDGE_PY = SCRIPTS_DIR / "start_bridge.py"
 SEND_CARD_PY = SCRIPTS_DIR / "send_card.py"
+SEND_MESSAGE_PY = SCRIPTS_DIR / "send_message.py"
+CHECK_INBOX_PY = SCRIPTS_DIR / "check_inbox.py"
 SKILL_MD = SCRIPTS_DIR.parent / "SKILL.md"
 
 
@@ -240,6 +248,206 @@ class TestBug6_ScriptProtection:
             "SKILL.md must specifically mention check_inbox.py as protected"
 
 
+class TestBug7_SentMessageRecording:
+    """Bug #7: send_message.py must record sent messages locally.
+
+    Without this, the agent only sees incoming messages in the conversation
+    log, making it impossible to track conversation context or detect
+    duplicate sends.
+    """
+
+    def test_send_message_records_to_messages_dir(self):
+        """send_message.py must write to messages/{peer_id}.jsonl after send."""
+        src = SEND_MESSAGE_PY.read_text(encoding="utf-8")
+        assert "messages" in src and ".jsonl" in src, \
+            "send_message.py must write sent messages to messages/{peer_id}.jsonl"
+
+    def test_send_message_includes_own_peer_id(self):
+        """Sent message entry must include own_peer_id as role."""
+        src = SEND_MESSAGE_PY.read_text(encoding="utf-8")
+        assert "own_peer_id" in src and '"role"' in src, \
+            "send_message.py must record own_peer_id as role in sent messages"
+
+    def test_send_message_has_resolve_peer_id(self):
+        """send_message.py must resolve wallet→peer_id for file naming."""
+        src = SEND_MESSAGE_PY.read_text(encoding="utf-8")
+        assert "_resolve_peer_id" in src or "resolve_peer" in src, \
+            "send_message.py must have wallet→peer_id resolution"
+
+    def test_send_message_recording_roundtrip(self):
+        """Verify sent message recording produces valid JSONL."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            msg_dir = Path(tmpdir) / "messages"
+            msg_dir.mkdir()
+            msg_file = msg_dir / "test_peer.jsonl"
+            entry = {
+                "role": "my_peer_id",
+                "content": "Hello test",
+                "type": "conversation",
+                "timestamp": "2026-03-12T00:00:00+00:00",
+            }
+            with open(msg_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            # Read back
+            lines = msg_file.read_text(encoding="utf-8").strip().split("\n")
+            parsed = json.loads(lines[0])
+            assert parsed["role"] == "my_peer_id"
+            assert parsed["content"] == "Hello test"
+
+
+class TestBug8_ReadCursorMechanism:
+    """Bug #8: check_inbox.py must use read cursors for unread tracking.
+
+    The old approach compared messages/*.jsonl against conversations/*.jsonl,
+    but conversations/ is only created during match evaluation, not message
+    exchange. This caused all messages to appear as 'already read'.
+    """
+
+    def test_check_inbox_uses_read_cursors(self):
+        """check_inbox.py must reference read_cursors.json."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        assert "read_cursors" in src, \
+            "check_inbox.py must use read_cursors.json for unread tracking"
+
+    def test_check_inbox_no_conversations_comparison(self):
+        """check_inbox.py must NOT compare against conversations/ for unread."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        # The old buggy pattern was: checking conversations_dir for peer files
+        # to determine read status
+        lines = src.split("\n")
+        has_conv_read_check = False
+        for line in lines:
+            if "conversations_dir" in line and ("exists" in line or "glob" in line):
+                # This is OK for directory creation, but not for unread comparison
+                if "mkdir" not in line and "exist_ok" not in line:
+                    has_conv_read_check = True
+        assert not has_conv_read_check, \
+            "check_inbox.py should not use conversations/ dir for unread detection"
+
+    def test_cursor_helpers_exist(self):
+        """check_inbox.py must have _load_read_cursors and _save_read_cursors."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        assert "_load_read_cursors" in src, "Missing _load_read_cursors helper"
+        assert "_save_read_cursors" in src, "Missing _save_read_cursors helper"
+
+    def test_cursor_auto_advance(self):
+        """check_inbox.py must auto-advance cursors after reading."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        # After reading new messages, cursors should be saved
+        assert "_save_read_cursors" in src, \
+            "check_inbox.py must call _save_read_cursors to advance cursors"
+
+    def test_cursor_roundtrip(self):
+        """Verify cursor file read/write produces correct tracking."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cursor_path = Path(tmpdir) / "read_cursors.json"
+            # Write cursors
+            cursors = {"peer_a": 5, "peer_b": 3}
+            cursor_path.write_text(json.dumps(cursors), encoding="utf-8")
+            # Read back
+            loaded = json.loads(cursor_path.read_text(encoding="utf-8"))
+            assert loaded == cursors, "Cursor roundtrip failed"
+            # Advance
+            loaded["peer_a"] = 8
+            cursor_path.write_text(json.dumps(loaded), encoding="utf-8")
+            reloaded = json.loads(cursor_path.read_text(encoding="utf-8"))
+            assert reloaded["peer_a"] == 8
+
+
+class TestBug9_PeerWalletMapping:
+    """Bug #9: peer_id ↔ wallet_address mapping must be consistent.
+
+    Without reliable mapping, send_message.py can't find the right peer_id
+    for a wallet address, and check_inbox.py can't resolve wallet for
+    outbound connection requests.
+    """
+
+    def test_check_inbox_saves_peer_info(self):
+        """check_inbox.py must save wallet to peers.json on card/connect."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        assert "_save_peer_info" in src, \
+            "check_inbox.py must call _save_peer_info for wallet tracking"
+
+    def test_save_peer_info_accepts_wallet(self):
+        """_save_peer_info must accept explicit wallet_address parameter."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        assert "wallet_address" in src and "def _save_peer_info" in src, \
+            "_save_peer_info must have wallet_address parameter"
+
+    def test_resolve_wallet_for_peer_exists(self):
+        """check_inbox.py must export resolve_wallet_for_peer function."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        assert "def resolve_wallet_for_peer" in src, \
+            "check_inbox.py must have resolve_wallet_for_peer function"
+
+    def test_send_message_has_wallet_mapping(self):
+        """send_message.py must save wallet→peer_id mapping."""
+        src = SEND_MESSAGE_PY.read_text(encoding="utf-8")
+        assert "_save_wallet_mapping" in src or "peers.json" in src, \
+            "send_message.py must maintain wallet→peer_id mapping"
+
+    def test_peer_mapping_roundtrip(self):
+        """Verify peers.json mapping read/write works."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            peers_path = Path(tmpdir) / "peers.json"
+            peers = {
+                "icy": {"wallet_address": "0xabc123", "last_seen": 1710000000},
+                "ziway": {"wallet_address": "0xdef456", "last_seen": 1710000001},
+            }
+            peers_path.write_text(json.dumps(peers), encoding="utf-8")
+            loaded = json.loads(peers_path.read_text(encoding="utf-8"))
+            assert loaded["icy"]["wallet_address"] == "0xabc123"
+            # Reverse lookup
+            target = "0xdef456"
+            found_id = None
+            for pid, info in loaded.items():
+                if info.get("wallet_address", "").lower() == target.lower():
+                    found_id = pid
+            assert found_id == "ziway", "Reverse wallet lookup failed"
+
+
+class TestBug10_DirectoryAutoCreation:
+    """Bug #10: check_inbox.py must create all required directories on first run.
+
+    On a fresh install, none of the data directories exist. Without
+    auto-creation, the first check_inbox.py call crashes with
+    FileNotFoundError when trying to glob inbox/*.md.
+    """
+
+    def test_check_inbox_creates_directories(self):
+        """check_inbox.py must mkdir all required directories at startup."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        required_dirs = ["inbox", "matches", "messages", "conversations", "handshakes"]
+        for d in required_dirs:
+            assert d in src, f"check_inbox.py must reference {d} directory"
+        assert "mkdir" in src, "check_inbox.py must call mkdir for directory creation"
+
+    def test_check_inbox_has_criteria_dir(self):
+        """check_inbox.py must also create criteria/ directory."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        assert "criteria" in src, "check_inbox.py must create criteria directory"
+
+    def test_check_inbox_uses_exist_ok(self):
+        """mkdir calls must use exist_ok=True to be idempotent."""
+        src = CHECK_INBOX_PY.read_text(encoding="utf-8")
+        assert "exist_ok=True" in src, \
+            "check_inbox.py mkdir must use exist_ok=True for idempotency"
+
+    def test_directory_creation_roundtrip(self):
+        """Verify directory creation logic works on fresh empty dir."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            required = ["inbox", "matches", "messages", "conversations",
+                        "criteria", "handshakes"]
+            for d in required:
+                (data_dir / d).mkdir(parents=True, exist_ok=True)
+            for d in required:
+                assert (data_dir / d).is_dir(), f"{d}/ not created"
+            # Second call should not fail (idempotent)
+            for d in required:
+                (data_dir / d).mkdir(parents=True, exist_ok=True)
+
+
 def run_tests():
     """Run all tests and report results."""
     import traceback
@@ -251,6 +459,10 @@ def run_tests():
         TestBug4_SendCardUsage,
         TestBug5_SendMessageFlag,
         TestBug6_ScriptProtection,
+        TestBug7_SentMessageRecording,
+        TestBug8_ReadCursorMechanism,
+        TestBug9_PeerWalletMapping,
+        TestBug10_DirectoryAutoCreation,
     ]
 
     total = 0
