@@ -91,7 +91,10 @@ def main():
             except json.JSONDecodeError:
                 pass
 
-        peer_id_for_save = f"agent_{peer_agent_id}" if peer_agent_id else peer_wallet[:10]
+        # Bug #11 fix: use _pending:<wallet> as provisional key.
+        # When we receive their first message, check_inbox.py will learn their
+        # real sender_id and merge this entry under the canonical key.
+        peer_id_for_save = f"_pending:{peer_wallet[:10].lower()}"
         peers[peer_id_for_save] = {
             "wallet_address": peer_wallet.lower(),
             "agent_id": peer_agent_id,

@@ -22,16 +22,27 @@ from xmtp_client import configure, send_xmtp, build_clawmatch_message, is_bridge
 def _resolve_peer_id(data_dir: Path, wallet: str) -> str:
     """Resolve wallet address to peer_id from peers.json.
 
-    Falls back to wallet[:10] if no mapping found.
+    Bug #11 fix: prefers canonical peer_id (e.g. "icy") over provisional
+    entries (prefixed with "_pending:"). Falls back to wallet[:10].
     """
     peers_path = data_dir / "peers.json"
     if peers_path.exists():
         try:
             peers = json.loads(peers_path.read_text(encoding="utf-8"))
             wallet_lower = wallet.lower()
+            canonical = None
+            provisional = None
             for pid, info in peers.items():
                 if info.get("wallet_address", "").lower() == wallet_lower:
-                    return pid
+                    if pid.startswith("_pending:"):
+                        provisional = pid
+                    else:
+                        canonical = pid
+            # Prefer canonical over provisional
+            if canonical:
+                return canonical
+            if provisional:
+                return provisional
         except (json.JSONDecodeError, OSError):
             pass
     return wallet[:10]

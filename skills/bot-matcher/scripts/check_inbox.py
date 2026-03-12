@@ -135,10 +135,97 @@ def pull_xmtp_messages(data_dir: Path) -> int:
     return processed
 
 
+def _consolidate_peer(data_dir: Path, canonical_id: str, wallet: str):
+    """Bug #11 fix: merge provisional/alias peer entries under the canonical sender_id.
+
+    When send_card.py sends a card, it creates a provisional entry like
+    ``_pending:0x320ecc6f`` because we don't yet know the peer's sender_id.
+    Once we receive their first message, we learn the real sender_id (e.g. "icy").
+    This function:
+      1. Finds any peers.json entries with the same wallet but a different key.
+      2. Merges their data (agent_id, wallet) into the canonical entry.
+      3. Removes the old entry.
+      4. Renames any message files from old key to canonical key.
+    """
+    if not wallet:
+        return
+
+    peers_path = data_dir / "peers.json"
+    if not peers_path.exists():
+        return
+    try:
+        peers = json.loads(peers_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+
+    wallet_lower = wallet.lower()
+    aliases_to_remove = []
+    merged_data = {}
+
+    for pid, info in peers.items():
+        if pid == canonical_id:
+            continue
+        if info.get("wallet_address", "").lower() == wallet_lower:
+            aliases_to_remove.append(pid)
+            # Collect data from alias (agent_id, wallet, etc.)
+            for k, v in info.items():
+                if v is not None and k != "last_seen":
+                    merged_data[k] = v
+
+    if not aliases_to_remove:
+        return
+
+    # Merge into canonical entry
+    canonical = peers.get(canonical_id, {})
+    for k, v in merged_data.items():
+        if not canonical.get(k):
+            canonical[k] = v
+    peers[canonical_id] = canonical
+
+    # Remove aliases
+    for alias in aliases_to_remove:
+        del peers[alias]
+
+    peers_path.write_text(json.dumps(peers, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # Rename message files: messages/{alias}.jsonl → merge into messages/{canonical}.jsonl
+    msg_dir = data_dir / "messages"
+    if msg_dir.exists():
+        canonical_file = msg_dir / "{}.jsonl".format(canonical_id)
+        for alias in aliases_to_remove:
+            alias_file = msg_dir / "{}.jsonl".format(alias)
+            if alias_file.exists():
+                # Append alias messages to canonical file
+                alias_content = alias_file.read_text(encoding="utf-8").strip()
+                if alias_content:
+                    with open(canonical_file, "a", encoding="utf-8") as f:
+                        f.write(alias_content + "\n")
+                alias_file.unlink()
+
+    # Migrate read cursors
+    cursor_path = data_dir / "read_cursors.json"
+    if cursor_path.exists():
+        try:
+            cursors = json.loads(cursor_path.read_text(encoding="utf-8"))
+            changed = False
+            for alias in aliases_to_remove:
+                if alias in cursors:
+                    # Add alias cursor to canonical cursor
+                    cursors[canonical_id] = cursors.get(canonical_id, 0) + cursors.pop(alias)
+                    changed = True
+            if changed:
+                cursor_path.write_text(
+                    json.dumps(cursors, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
+        except (json.JSONDecodeError, OSError):
+            pass
+
+
 def _save_peer_info(data_dir: Path, peer_id: str, payload: dict, wallet_address: str = None):
     """Save peer info (wallet_address, agent_id) to peers.json.
 
     Bug #9 fix: consistently store wallet_address for peer_id ↔ wallet mapping.
+    Bug #11 fix: after saving, consolidate any aliases with same wallet.
     """
     peers_path = data_dir / "peers.json"
     peers = {}
@@ -160,6 +247,10 @@ def _save_peer_info(data_dir: Path, peer_id: str, payload: dict, wallet_address:
     peers[peer_id] = peer_entry
 
     peers_path.write_text(json.dumps(peers, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # Bug #11: consolidate any provisional/alias entries with same wallet
+    if w:
+        _consolidate_peer(data_dir, peer_id, w)
 
 
 def resolve_wallet_for_peer(data_dir: Path, peer_id: str) -> Optional[str]:
