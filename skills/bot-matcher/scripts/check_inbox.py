@@ -20,6 +20,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 from xmtp_client import configure, get_inbox, is_bridge_running, parse_clawmatch_message
@@ -161,7 +162,7 @@ def _save_peer_info(data_dir: Path, peer_id: str, payload: dict, wallet_address:
     peers_path.write_text(json.dumps(peers, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def resolve_wallet_for_peer(data_dir: Path, peer_id: str) -> str | None:
+def resolve_wallet_for_peer(data_dir: Path, peer_id: str) -> Optional[str]:
     """Look up wallet_address for a peer_id from peers.json."""
     peers_path = data_dir / "peers.json"
     if peers_path.exists():
